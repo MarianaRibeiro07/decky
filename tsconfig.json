@@ -1,6 +1,14 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
-  }
+    "strict": true,
+    "allowImportingTsExtensions": true
+  },
+  "exclude": [
+    "node_modules",
+    "tests/sql",
+    "supabase/functions/start-match",
+    "supabase/functions/submit-action",
+    "supabase/functions/_shared/http.ts"
+  ]
 }
