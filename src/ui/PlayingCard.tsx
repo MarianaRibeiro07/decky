@@ -12,7 +12,9 @@ export function cardLabel(card: Card): string {
 }
 
 const RATIO = 726 / 500;
-const BACK = require('../../assets/Fundo-Carta-Vermelho.png');
+/** Verso das cartas do Decky (baralho fechado, cartas dos outros jogadores e distribuição). */
+export const CARD_BACK = require('../../assets/Fundo-Carta-Vermelho.png');
+const BACK = CARD_BACK;
 
 interface Props {
   card?: Card;
@@ -20,13 +22,15 @@ interface Props {
   width: number;
   faceDown?: boolean;
   highlighted?: boolean;
+  /** Carta escolhida na mão, aguardando confirmação. */
+  selected?: boolean;
   dimmed?: boolean;
   onPress?: () => void;
   disabled?: boolean;
   hint?: string;
 }
 
-export function PlayingCard({ card, width, faceDown, highlighted, dimmed, onPress, disabled, hint }: Props) {
+export function PlayingCard({ card, width, faceDown, highlighted, selected, dimmed, onPress, disabled, hint }: Props) {
   const height = width * RATIO;
   const face = !faceDown && card ? card : null;
   const image = (
@@ -35,6 +39,7 @@ export function PlayingCard({ card, width, faceDown, highlighted, dimmed, onPres
         styles.frame,
         { width, height },
         highlighted && styles.highlighted,
+        selected && styles.selected,
         dimmed && styles.dimmed,
       ]}
     >
@@ -60,9 +65,9 @@ export function PlayingCard({ card, width, faceDown, highlighted, dimmed, onPres
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
-      accessibilityLabel={face ? `Jogar ${cardLabel(face)}` : 'carta virada'}
+      accessibilityLabel={face ? cardLabel(face) : 'carta virada'}
       accessibilityHint={hint}
-      accessibilityState={{ disabled: !!disabled }}
+      accessibilityState={{ disabled: !!disabled, selected: !!selected }}
       style={({ pressed }) => [pressed && !disabled && styles.pressed]}
     >
       {image}
@@ -80,6 +85,7 @@ const styles = StyleSheet.create({
   },
   image: { width: '100%', height: '100%' },
   highlighted: { borderWidth: 4, borderColor: colors.gold },
+  selected: { borderWidth: 4, borderColor: colors.red },
   dimmed: { opacity: 0.55 },
   pressed: { transform: [{ translateY: -10 }] },
 });
