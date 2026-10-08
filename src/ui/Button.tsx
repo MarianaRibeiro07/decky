@@ -11,10 +11,12 @@ interface Props {
   loading?: boolean;
   /** Texto extra para leitores de tela. */
   hint?: string;
+  /** 'compact' para fileiras de ações lado a lado (mantém o alvo de toque mínimo). */
+  size?: 'normal' | 'compact';
   style?: StyleProp<ViewStyle>;
 }
 
-export function Button({ label, onPress, variant = 'primary', disabled, loading, hint, style }: Props) {
+export function Button({ label, onPress, variant = 'primary', disabled, loading, hint, size = 'normal', style }: Props) {
   const inactive = disabled || loading;
   const palette = VARIANTS[variant];
   return (
@@ -27,6 +29,7 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading,
       disabled={inactive}
       style={({ pressed }) => [
         styles.base,
+        size === 'compact' && styles.compact,
         { backgroundColor: palette.bg, borderColor: palette.border },
         pressed && styles.pressed,
         inactive && styles.disabled,
@@ -36,7 +39,11 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading,
       {loading ? (
         <ActivityIndicator color={palette.text} />
       ) : (
-        <Text style={[styles.label, { color: palette.text }]} maxFontSizeMultiplier={1.6}>
+        <Text
+          style={[styles.label, size === 'compact' && styles.labelCompact, { color: palette.text }]}
+          maxFontSizeMultiplier={size === 'compact' ? 1.3 : 1.6}
+          numberOfLines={size === 'compact' ? 2 : undefined}
+        >
           {label}
         </Text>
       )}
@@ -61,11 +68,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  compact: { minHeight: TOUCH_MIN + 4, paddingHorizontal: space.sm, paddingVertical: space.xs },
   label: {
     fontSize: font.large,
     fontWeight: '700',
     textAlign: 'center',
   },
+  labelCompact: { fontSize: font.body - 1, fontWeight: '800' },
   pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
   disabled: { opacity: 0.45 },
 });

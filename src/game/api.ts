@@ -49,7 +49,7 @@ export async function submitAction(matchId: string, action: GameAction, expected
 export async function fetchMatch(matchId: string): Promise<MatchView | null> {
   const { data, error } = await supabase
     .from('matches')
-    .select('id, room_id, revision, public_state, rooms(code)')
+    .select('id, room_id, revision, public_state, table_user_id, rooms(code)')
     .eq('id', matchId)
     .maybeSingle();
   if (error) throw error;
@@ -61,9 +61,11 @@ export async function fetchMatch(matchId: string): Promise<MatchView | null> {
     roomCode: room?.code ?? null,
     revision: data.revision,
     state: data.public_state,
+    tableUserId: data.table_user_id ?? null,
   };
 }
 
+/** Mão de quem chama. A mesa (e qualquer não jogador) recebe null: o servidor não tem mão para ela. */
 export async function fetchMyHand(matchId: string): Promise<PrivateHand | null> {
   const { data, error } = await supabase.rpc('get_my_hand', { p_match_id: matchId });
   if (error) throw error;

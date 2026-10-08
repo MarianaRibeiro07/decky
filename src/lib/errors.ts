@@ -14,6 +14,7 @@ const MESSAGES: Record<string, string> = {
   already_in_room: 'Você já está nesta sala.',
   seat_taken: 'Este lugar já está ocupado.',
   invalid_seat: 'Lugar inválido.',
+  invalid_mode: 'Modo de sala inválido.',
   not_host: 'Só quem criou a sala pode iniciar.',
   not_enough_players: 'São necessários 4 jogadores.',
   players_not_ready: 'Todos precisam marcar "Pronto".',
@@ -23,7 +24,7 @@ const MESSAGES: Record<string, string> = {
   illegal_action: 'Esta jogada não é permitida agora.',
   match_over: 'A partida já terminou.',
   conflict: 'A mesa mudou. Atualizamos para você, tente de novo.',
-  not_member: 'Você não está nesta partida.',
+  not_member: 'Só os 4 jogadores podem jogar. A mesa apenas mostra a partida.',
   match_not_found: 'Partida não encontrada.',
   // Genéricos
   bad_request: 'Pedido inválido.',

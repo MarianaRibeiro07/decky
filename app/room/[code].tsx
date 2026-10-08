@@ -2,10 +2,10 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../../src/auth/AuthProvider';
-import type { RoomSeat, Seat } from '../../src/contracts/types';
+import type { HostMode, RoomSeat, Seat } from '../../src/contracts/types';
 import { startMatch } from '../../src/game/api';
 import { errorMessage } from '../../src/lib/errors';
-import { changeSeat, leaveRoom, setReady } from '../../src/rooms/api';
+import { changeSeat, leaveRoom, setHostMode, setReady } from '../../src/rooms/api';
 import { useRoom } from '../../src/rooms/useRoom';
 import { Button } from '../../src/ui/Button';
 import { Notice } from '../../src/ui/Notice';
@@ -32,6 +32,7 @@ export default function Lobby() {
 
   const me = seats.find((s) => s.userId === userId);
   const isHost = !!room && room.hostUserId === userId;
+  const tableMode = room?.hostMode === 'table';
   const allReady = seats.length === 4 && seats.every((s) => s.ready);
 
   async function run(key: string, action: () => Promise<unknown>) {
@@ -62,7 +63,8 @@ export default function Lobby() {
     router.replace('/');
   }
 
-  if (loaded && (gone || !me)) {
+  // No modo mesa o dono não ocupa lugar, mas continua na sala.
+  if (loaded && (gone || (!me && !isHost))) {
     return (
       <Screen title="Sala indisponível">
         <Notice kind="info" message="Esta sala não existe mais ou você não está nela." />
@@ -86,6 +88,17 @@ export default function Lobby() {
       </View>
 
       {connection === 'reconnecting' ? <Notice kind="info" message="Reconectando..." /> : null}
+
+      {room ? (
+        <ModeBox
+          mode={room.hostMode}
+          isHost={isHost}
+          busy={busy === 'mode'}
+          disabled={!!busy}
+          onSwitch={(mode) => run('mode', () => setHostMode(room.id, mode))}
+        />
+      ) : null}
+
       <Text style={styles.teams}>Dupla A: lugares 1 e 3 · Dupla B: lugares 2 e 4</Text>
 
       <View style={styles.grid}>
@@ -99,6 +112,8 @@ export default function Lobby() {
                 isMe={me?.seat === seat}
                 hostId={room?.hostUserId}
                 disabled={!!busy}
+                // A mesa não senta: para ela, lugar livre só mostra que falta jogador.
+                canSit={!!me}
                 onSit={() => room && run(`seat-${seat}`, () => changeSeat(room.id, seat))}
               />
             ))}
@@ -119,17 +134,67 @@ export default function Lobby() {
 
       {isHost ? (
         <Button
-          label={allReady ? 'Iniciar partida' : `Iniciar (${seats.filter((s) => s.ready).length}/4 prontos)`}
+          label={
+            allReady
+              ? 'Iniciar partida'
+              : seats.length < 4
+                ? `Aguardando jogadores (${seats.length}/4)`
+                : `Iniciar (${seats.filter((s) => s.ready).length}/4 prontos)`
+          }
           disabled={!allReady}
           loading={busy === 'start'}
           onPress={handleStart}
         />
       ) : (
-        <Text style={styles.waiting}>Aguardando quem criou a sala iniciar.</Text>
+        <Text style={styles.waiting}>
+          {tableMode ? 'Aguardando a mesa (quem criou a sala) iniciar.' : 'Aguardando quem criou a sala iniciar.'}
+        </Text>
       )}
 
       <Button label="Sair da sala" variant="secondary" onPress={handleLeave} loading={busy === 'leave'} />
     </Screen>
+  );
+}
+
+interface ModeBoxProps {
+  mode: HostMode;
+  isHost: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onSwitch: (mode: HostMode) => void;
+}
+
+/** Mostra como a sala funciona (dono joga ou é a mesa) e, para o dono, permite trocar no lobby. */
+function ModeBox({ mode, isHost, busy, disabled, onSwitch }: ModeBoxProps) {
+  const table = mode === 'table';
+  const title = table
+    ? isHost
+      ? 'Este celular é a mesa'
+      : 'Mesa central ativa'
+    : isHost
+      ? 'Você joga nesta sala'
+      : 'Quem criou a sala também joga';
+  const description = table
+    ? isHost
+      ? 'Ele mostra só a mesa e o placar, sem cartas de ninguém. Os 4 lugares são dos jogadores.'
+      : 'O celular de quem criou a sala mostra a mesa no centro. Sua mão aparece só no seu celular.'
+    : '4 celulares: cada um mostra a mesa em cima e a própria mão embaixo.';
+
+  return (
+    <View style={[styles.modeBox, table && styles.modeBoxTable]} accessible={!isHost} accessibilityLabel={`${title}. ${description}`}>
+      <Text style={[styles.modeTitle, table && styles.modeTitleTable]}>{title}</Text>
+      <Text style={[styles.modeText, table && styles.modeTextTable]}>{description}</Text>
+      {isHost ? (
+        <Button
+          label={table ? 'Trocar: quero jogar' : 'Trocar: este celular será a mesa'}
+          variant={table ? 'gold' : 'secondary'}
+          size="compact"
+          loading={busy}
+          disabled={disabled}
+          onPress={() => onSwitch(table ? 'player' : 'table')}
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -139,10 +204,11 @@ interface SeatBoxProps {
   isMe: boolean;
   hostId: string | undefined;
   disabled: boolean;
+  canSit: boolean;
   onSit: () => void;
 }
 
-function SeatBox({ seat, player, isMe, hostId, disabled, onSit }: SeatBoxProps) {
+function SeatBox({ seat, player, isMe, hostId, disabled, canSit, onSit }: SeatBoxProps) {
   const team = seat % 2 === 1 ? 'A' : 'B';
   const teamColor = team === 'A' ? colors.teamA : colors.teamB;
   const header = `Lugar ${seat} · Dupla ${team}`;
@@ -152,13 +218,13 @@ function SeatBox({ seat, player, isMe, hostId, disabled, onSit }: SeatBoxProps) 
       <Pressable
         style={({ pressed }) => [styles.seat, styles.seatFree, pressed && { opacity: 0.7 }]}
         onPress={onSit}
-        disabled={disabled}
+        disabled={disabled || !canSit}
         accessibilityRole="button"
-        accessibilityLabel={`${header}, livre. Toque para sentar aqui`}
+        accessibilityLabel={`${header}, livre.${canSit ? ' Toque para sentar aqui' : ' Aguardando jogador'}`}
       >
         <Text style={[styles.seatHeader, { color: teamColor }]}>{header}</Text>
         <Text style={styles.free}>Livre</Text>
-        <Text style={styles.freeHint}>Toque para sentar</Text>
+        <Text style={styles.freeHint}>{canSit ? 'Toque para sentar' : 'Aguardando jogador'}</Text>
       </Pressable>
     );
   }
@@ -193,6 +259,12 @@ const styles = StyleSheet.create({
   codeLabel: { color: colors.feltText, fontSize: font.body, textAlign: 'center' },
   code: { color: colors.paper, fontSize: font.huge + 6, fontWeight: '900', letterSpacing: 8, textAlign: 'center' },
   teams: { fontSize: font.small + 1, color: colors.muted, textAlign: 'center' },
+  modeBox: { borderRadius: radius.md, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.paper, padding: space.md, gap: space.xs },
+  modeBoxTable: { backgroundColor: colors.felt, borderColor: colors.felt },
+  modeTitle: { fontSize: font.body, fontWeight: '900', color: colors.ink },
+  modeTitleTable: { color: colors.gold },
+  modeText: { fontSize: font.small, color: colors.muted },
+  modeTextTable: { color: colors.feltText },
   grid: { gap: space.sm, backgroundColor: colors.felt, borderRadius: radius.lg, padding: space.sm },
   row: { flexDirection: 'row', gap: space.sm },
   seat: {

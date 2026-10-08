@@ -23,6 +23,7 @@ function RootStack() {
       </Stack.Protected>
       <Stack.Protected guard={!!session}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="room/create" />
         <Stack.Screen name="room/join" />
         <Stack.Screen name="room/[code]" />
         <Stack.Screen name="game/[matchId]" options={{ gestureEnabled: false }} />
