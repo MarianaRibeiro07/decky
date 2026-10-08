@@ -4,9 +4,9 @@ Aplicativo mobile que substitui as cartas físicas em partidas **presenciais** d
 
 Projeto da atividade de Desenvolvimento Mobile/Scrum do SENAI. Apresentação prevista: **09/10/2026**.
 
-> **Estado atual: planejamento.** Não existe código do aplicativo ainda. Tudo listado em "Funcionalidades do MVP" está **planejado, não implementado**. O status real de cada tarefa fica em [docs/SPRINT_BACKLOG.md](docs/SPRINT_BACKLOG.md).
+> **Estado atual: implementado, aguardando teste em 4 aparelhos.** O app, o backend (migrations, RLS, RPCs, Edge Functions) e o motor de regras existem e passam nos testes automatizados. Ainda não foram verificados no Supabase real com 4 celulares. O status de cada tarefa fica em [docs/SPRINT_BACKLOG.md](docs/SPRINT_BACKLOG.md).
 
-## Funcionalidades do MVP (planejadas)
+## Funcionalidades do MVP
 
 - Cadastro, login e logout com validação por REGEX e mensagens de erro claras.
 - Criar sala com código curto, entrar por código, quatro posições fixas e duas duplas.
@@ -14,7 +14,7 @@ Projeto da atividade de Desenvolvimento Mobile/Scrum do SENAI. Apresentação pr
 - Tela dividida: mesa pública em cima, mão privada embaixo.
 - Truco Paulista completo: manilha variável, vazas, pedidos 3/6/9/12, placar automático até 12 pontos.
 - Histórico com CRUD de notas ligadas às partidas.
-- Opcional (P1): quinto aparelho em modo mesa, que só vê o estado público.
+- **Não implementado (P1):** quinto aparelho em modo mesa e QR code da sala.
 
 ## Equipe
 
@@ -35,20 +35,35 @@ React Native, Expo, TypeScript e Expo Router no cliente. Supabase (Auth, Postgre
 
 - Node.js LTS e npm.
 - Aplicativo Expo Go em um celular ou um emulador Android.
-- Um projeto Supabase criado pelo grupo (URL e chave publishable/anon).
+- O projeto Supabase do grupo, com as migrations e as Edge Functions publicadas (ver "Backend").
 
 ## Como executar
 
-**A implementar.** Quando o app existir, estes passos serão preenchidos pelo grupo:
+1. `npm install`
+2. Copiar `.env.example` para `.env` e preencher com a URL e a chave anon do projeto Supabase (sem `/rest/v1/` no fim da URL).
+3. `npx expo start` e ler o QR code com o Expo Go.
 
-1. Instalar dependências.
-2. Copiar `.env.example` para `.env` e preencher com os valores do projeto Supabase.
-3. Aplicar as migrations de `supabase/migrations/`.
-4. Iniciar o app com Expo.
+### Backend
+
+O Supabase está ligado ao repositório `rbrecci/Decky` pela integração GitHub. Quando `supabase/` chega na branch de produção de lá, as migrations são aplicadas e as Edge Functions de `supabase/config.toml` são publicadas. Detalhes e plano B em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#deploy).
+
+Para a demonstração, desligue **Confirm email** em Authentication > Providers > Email no painel do Supabase.
+
+### Testes
+
+`npm test` roda tudo (Vitest):
+
+| Pasta | O que cobre |
+|---|---|
+| `tests/engine/` | Motor do truco: baralho, manilha, vazas, empates, truco 3/6/9/12, correr, mão de 11, 200 partidas aleatórias |
+| `tests/sql/` | Migrations reais num Postgres em memória (PGlite): salas, RLS, mãos privadas, idempotência, conflito de revisão, CRUD de notas |
+| `tests/app/` | REGEX de e-mail, senha e nome; textos da mesa |
+
+`npm run typecheck` confere os tipos do app e do motor.
 
 ### Variáveis de ambiente
 
-Nomes previstos (valores **nunca** entram no Git; o arquivo `.env.example` será criado por Rafael com placeholders):
+Valores **nunca** entram no Git; o `.env` é ignorado pelo `.gitignore`:
 
 | Variável | Uso |
 |---|---|
@@ -70,4 +85,4 @@ A chave `service_role` e quaisquer secrets de função ficam apenas no painel do
 | [docs/QA_DEMO.md](docs/QA_DEMO.md) | Checklist de QA e roteiro de demonstração |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Branches, commits, PRs e segredos |
 
-O documento ABNT é produzido pelo grupo separadamente e não faz parte deste repositório de planejamento.
+O documento ABNT é produzido pelo grupo separadamente e não faz parte deste repositório.
