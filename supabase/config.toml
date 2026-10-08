@@ -1,0 +1,14 @@
+# Configuração lida pela integração GitHub do Supabase.
+# Ao chegar na branch de produção: as migrations de supabase/migrations são aplicadas
+# e as funções declaradas abaixo são publicadas.
+project_id = "decky"
+
+# verify_jwt = false porque cada função valida o token do usuário por conta própria
+# (auth.getUser), o que funciona tanto com as chaves JWT antigas quanto com as novas.
+[functions.start-match]
+verify_jwt = false
+entrypoint = "./functions/start-match/index.ts"
+
+[functions.submit-action]
+verify_jwt = false
+entrypoint = "./functions/submit-action/index.ts"
