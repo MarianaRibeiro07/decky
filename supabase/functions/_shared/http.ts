@@ -22,6 +22,15 @@ export function adminClient(): SupabaseClient {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
+/** Adapta o cliente de serviço ao formato `Rpc` do match-service: devolve o jsonb ou lança. */
+export function rpcFor(admin: SupabaseClient) {
+  return async (fn: string, params: Record<string, unknown>) => {
+    const { data, error } = await admin.rpc(fn, params);
+    if (error) throw error;
+    return data;
+  };
+}
+
 /** Valida o token do usuário que chamou a função e devolve o id dele. */
 export async function authenticatedUserId(req: Request, admin: SupabaseClient): Promise<string | null> {
   const token = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '');

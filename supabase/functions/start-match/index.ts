@@ -1,22 +1,10 @@
 // POST { roomId } -> { ok: true, matchId } | { ok: false, error }
-// Sorteia as cartas no servidor e grava a partida. Idempotente: se já houver partida
-// em andamento na sala, devolve a mesma.
-import { cryptoRng, newMatch } from '../_shared/engine/index.ts';
-import { json, serve } from '../_shared/http.ts';
+// A regra fica em _shared/match-service.ts (testada em tests/sql/flow.test.ts).
+import { cryptoRng } from '../_shared/engine/index.ts';
+import { json, rpcFor, serve } from '../_shared/http.ts';
+import { startMatchService } from '../_shared/match-service.ts';
 
 serve(async (body, userId, admin) => {
-  const roomId = body.roomId;
-  if (typeof roomId !== 'string') return json({ ok: false, error: 'bad_request' }, 400);
-
-  const state = newMatch(cryptoRng());
-  const { data, error } = await admin.rpc('internal_start_match', {
-    p_room_id: roomId,
-    p_user_id: userId,
-    p_state: state.public,
-    p_hands: state.hands,
-  });
-  if (error) throw error;
-
-  // Resultado sem cartas: a mão de cada um é buscada por get_my_hand.
-  return json(data.ok ? { ok: true, matchId: data.matchId } : { ok: false, error: data.error });
+  const { status, body: result } = await startMatchService(rpcFor(admin), userId, body, cryptoRng());
+  return json(result, status);
 });
