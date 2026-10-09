@@ -41,10 +41,13 @@ Princípios:
 | `src/rooms/` | API de salas e `useRoom` (lobby em tempo real) |
 | `src/game/` | API da partida, `useMatch` (estado público, mão e papel do aparelho), textos da mesa |
 | `src/game/PlayerGame.tsx`, `src/game/TableGame.tsx` | As duas telas de partida: jogador (sem mesa dedicada: mesa em cima e mão embaixo; com mesa dedicada: só mão e essencial público) e mesa central (só público) |
-| `src/game/components/` | `TableBoard` (mesa completa), `PlayerHud` (essencial público do jogador quando há mesa dedicada), `DealLayer` (distribuição animada), `ViraCard`, `SeatChip`, `ScoreBar`, `StatusBanner`, `HandPanel` (mão e controles), `FinishedOverlay` |
+| `src/game/components/` | `TableBoard` (mesa completa), `PlayerHud` (essencial público do jogador quando há mesa dedicada), `DealLayer` (distribuição animada), `ViraCard`, `SeatChip` (etiqueta do lugar), `PlayerIdentity` (avatar, selo da vez, cartas na mão, rótulo da dupla), `TrucoCallout` (aviso de pedido e aceite de truco), `ScoreBar`, `StatusBanner`, `HandPanel` (mão e controles), `FinishedOverlay` |
+| `src/game/cue.ts` + `useTableCue.ts` | Qual aviso mostrar para a última ação confirmada e quando (puro e testado; o hook só cuida do tempo de exibição) |
+| `src/game/calloutLayout.ts` | Medidas do aviso de truco para o espaço disponível (puro, testado: cabe no palco) |
+| `src/rooms/SeatPicker.tsx` | Lugares da sala sobre a bandeja de feltro |
 | `src/game/deal.ts`, `useDealAnimation.ts` | Ordem e cronograma da distribuição, a regra "anima uma vez por mão" e a fase calculada no render |
 | `src/game/matchData.ts` | Junta cada leitura ao estado atual sem recriar o que não mudou (polling não redesenha) e descarta mão em aparelho que não é jogador |
-| `src/game/geometry.ts` | Posições da mesa (puro, testado: nada se sobrepõe) |
+| `src/game/geometry.ts` | Posições da mesa (puro, testado: nada se sobrepõe e tudo fica dentro da curva do feltro) |
 | `src/game/controls.ts`, `status.ts` | Botões de truco legais e a linha de status (puros, testados) |
 | `app/room/create.tsx` | Criar sala escolhendo o modo (dono joga ou é a mesa) |
 | `app/dev/preview.tsx` | **Fixture local, só em desenvolvimento**: simula o servidor com o motor para ver a mesa sem Supabase |
@@ -62,7 +65,7 @@ Princípios:
 | Tipo | Papel | Sensível? |
 |---|---|---|
 | `Room`, `RoomSeat` | Sala (`lobby`, `playing`, `finished`), `hostMode` (`player` ou `table`) e posições 1 a 4, duplas A (1 e 3) e B (2 e 4) | Não |
-| `PublicGameState` | Placar, vira, manilha, vez, valor da mão, truco pendente, cartas na mesa, vazas, última vaza, última mão e `lastEvent` (última ação aceita, para as falas "TRUCO!", "Aceito!") | Não |
+| `PublicGameState` | Placar, vira, manilha, vez, valor da mão, truco pendente, cartas na mesa, vazas, última vaza, última mão e `lastEvent` (última ação aceita, para os avisos de truco e a fala "Corro!") | Não |
 | `MatchView` | `PublicGameState` + `revision` + `roomCode` + `tableUserId` | Não |
 | `MatchRole` | `player` (está em `match_players`, tem mão) ou `table` (é o `table_user_id`) | Não |
 | `PrivateHand` | `seat`, `cards`, `revision` do próprio usuário | **Sim** |
@@ -161,7 +164,16 @@ O app decide qual tela mostrar pelo que o servidor entregou (`resolveRole` e `pl
 
 ## Mesa e distribuição animada
 
-`TableBoard` desenha a mesa completa: na mesa central (`large`) e, quando não há mesa dedicada, na metade de cima do jogador (`compact`). As posições vêm de `tableGeometry`, que garante que lugares, cartas jogadas, baralho, vira e selo da manilha não se sobrepõem (teste em `tests/app/table.test.ts`). Quem olha fica sempre embaixo; a mesa central põe o lugar 1 embaixo.
+`TableBoard` desenha a mesa completa: na mesa central (`large`) e, quando não há mesa dedicada, na metade de cima do jogador (`compact`). As posições vêm de `tableGeometry`, que garante que lugares, cartas jogadas, baralho, vira e selo da manilha não se sobrepõem e que **os quatro cantos de cada caixa ficam dentro da curva do feltro**, com folga (teste em `tests/app/table.test.ts`, em nove tamanhos de tela). Quem olha fica sempre embaixo; a mesa central põe o lugar 1 embaixo.
+
+Layout responsivo da mesa:
+
+- O conteúdo fica dentro do feltro (`surfaceMetrics(...).content` é o próprio feltro). Antes ele avançava sobre o aro, e as etiquetas perto dos cantos passavam por cima do trilho e do couro.
+- A mesa é uma superelipse: a borda "entra" perto dos cantos, e mais fundo quanto maior a mesa. `tableGeometry` recebe o expoente da forma e recua as etiquetas de cima e de baixo e as colunas laterais pela profundidade da curva sob os cantos (`superellipseDepth`). Um recuo fixo só funcionava num tamanho.
+- Etiquetas em cima e embaixo são largas (avatar ao lado do nome); nas laterais, estreitas e em coluna (avatar em cima). A altura da etiqueta lateral se adapta à altura da mesa; na mesa dedicada baixa, as de cima e de baixo também ficam mais baixas.
+- `stage` é o palco do centro (entre as quatro cartas jogadas, onde ficam baralho e vira). Os avisos de truco aparecem só ali, sem cobrir carta jogada nem etiqueta.
+- O banner de status tem altura fixa (linha principal + uma linha de complemento): se crescesse, a mesa encolheria e tudo mudaria de lugar justo no pedido de truco. Frases curtas usam o primeiro nome.
+- No aparelho da mesa com menos de 720 pt de altura, placar e banner usam o tamanho compacto, para a mesa ficar com a altura.
 
 Distribuição (`src/game/deal.ts`, animada com React Native Reanimated):
 
@@ -188,7 +200,25 @@ Regras da animação:
 - Uma trava síncrona impede dois envios por toque duplo; o servidor também é idempotente pelo `clientActionId`.
 - Os botões de truco vêm de `trucoControls`, espelho de `getLegalActions`: pedir (TRUCO, SEIS, NOVE ou DOZE, conforme o valor) e, para a dupla que responde, Aceitar, Correr e Pedir o próximo valor. A dupla que pediu vê "Aguardando a outra dupla responder". Correr sem pedido pendente pede confirmação.
 - A carta jogada entra na mesa vindo do lado de quem jogou; a vencedora da vaza é destacada quando a mesa limpa.
-- Quem pediu, aceitou ou correu ganha uma fala curta ao lado do nome ("TRUCO!", "Aceito!", "Corro!") em todos os aparelhos, a partir de `lastEvent`.
+- A vez é destacada (contorno e avatar dourados, selo "VEZ") só quando não há pedido de truco pendente (`activeTurnSeat`), igual na mesa e no painel do jogador. O brilho entra uma vez e fica parado: não pulsa.
+
+## Avisos de truco
+
+Pedido (3, 6, 9, 12) e aceite aparecem como uma plaquinha no palco do centro da mesa (`TrucoCallout`) e, com mesa dedicada, também ao lado da vira no painel do jogador. "Corro!" continua como fala curta junto de quem correu.
+
+| Evento | Visual |
+|---|---|
+| Pedido / aumento | Laca vermelha do logo: medalhão creme com o valor, "BIA PEDE" (ou "AUMENTA"), o nome do pedido e a escada da aposta (quatro losangos: 3, 6, 9, 12, preenchidos até o valor). Entra vindo do lado de quem pediu; o medalhão estoura com ondas. A cada degrau o estouro fica um pouco maior e há uma onda a mais: mesma linguagem, intensidade proporcional |
+| Aceite | Selo dourado: o medalhão mostra o valor que a mão passou a valer, "ACEITO!" e a escada em dourado. Desce como carimbo e um brilho atravessa a plaquinha. No placar, "Vale 6" entra com um leve salto |
+
+Sincronização (`src/game/cue.ts`, `useTableCue`):
+
+- O aviso sai do `lastEvent` **conferido com o estado que veio junto**: pedido só com pedido pendente; aceite só com o pedido já resolvido e o novo valor em `handValue`. Nada aparece antes de o servidor confirmar.
+- Cada revisão anuncia no máximo uma vez (a revisão é a chave do componente). Revisão nova substitui o aviso anterior na hora, então a ordem é a do servidor (pedido, depois aceite).
+- Primeira leitura da tela, leitura que recupera uma queda de conexão e salto de mais de 3 revisões (app voltou do segundo plano) não anunciam: evento velho não é reapresentado.
+- O tempo de exibição (2,6 s para pedido, 2,2 s para aceite) é só apresentação: nada no jogo espera por ele, os controles continuam livres, e o fim vem de `useRerenderAt` (timer limpo ao desmontar). Durante a distribuição o aviso não aparece.
+- As animações rodam uma vez, na thread de UI, só com `withTiming`: com "reduzir movimento" ligado, `withSpring` não avançava no web e o aviso ficava invisível. Nesse modo o aviso aparece direto, sem movimento.
+- O tamanho da plaquinha sai de `calloutLayout`: em linha quando há largura, empilhado no palco estreito, e sem medalhão quando o palco é muito baixo (o título já diz o pedido). Um teste confere que tudo cabe no palco em seis tamanhos de mesa.
 
 ## Identidade visual
 
@@ -201,11 +231,12 @@ Cassino reservado: preto e grafite dominam, a mesa é o destaque. O logo (`asset
 | Mesa | `TableSurface` desenha em SVG (`react-native-svg`, já usado no projeto) o tampo em superelipse: lateral visível embaixo (espessura), aro de couro com costura e reflexo da luminária, trilho metálico, feltro carvão com luz no centro, textura (`assets/textures/felt.png`, 128 px que repete sem emenda) e sombra interna do trilho. É estático e memorizado por tamanho. `surfaceMetrics` diz onde fica o feltro; o `TableBoard` posiciona lugares e cartas nessa área com a mesma `tableGeometry` de antes |
 | Cartas na mesa | Sombra curta de apoio (`boxShadow`) e leve inclinação por lugar (só `rotate`, sem deformar). A inclinação fica numa view interna para não brigar com a animação de entrada |
 | Profundidade | Sem engine 3D nem perspectiva real: a perspectiva distorceria as cartas e complicaria o toque. A sensação de objeto físico vem da lateral do tampo, das sombras e da luz. Pés da mesa não aparecem porque o enquadramento é de cima |
-| Telas | `Screen` (fundo `Backdrop` + título com filete dourado), `Panel` (superfície grafite), `Button` (`primary` laca vermelha, `dark` grafite, `secondary` contorno, `gold` bronze, `ghost` só texto; estados pressionado, desabilitado e carregando) e `FeltPanel` (bandeja de feltro do HUD e do lobby) |
+| Telas | `Screen` (fundo `Backdrop` + título com filete dourado), `Panel` (superfície grafite), `Button` (`primary` laca vermelha, `dark` grafite, `secondary` contorno, `gold` bronze, `ghost` só texto; estados pressionado, desabilitado e carregando) e `FeltPanel` (bandeja de feltro do HUD e do lobby, em retângulo com cantos de raio fixo: assim o recuo do conteúdo vale em qualquer tamanho) |
+| Jogadores | Avatar em forma de ficha de cassino (`PlayerAvatar`): aro na cor da dupla, iniciais em creme na Playfair; na vez, aro dourado. Nome em destaque (reticências quando não cabe, ou até duas linhas na sala), dupla em versalete na cor da dupla e cartas na mão como três silhuetas (cheias as que restam), no lugar dos versos em miniatura, que ficavam ilegíveis |
 
 Sombras usam `boxShadow`, que no React Native 0.86 funciona no Android e no iOS (nova arquitetura). Cartas voando na distribuição não têm sombra, para não pesar.
 
-Custo da borda da mesa: o aro tira espaço das cartas. Para compensar, as plaquinhas dos lugares avançam sobre o couro na mesa dedicada. Medido com `tableGeometry`: a carta da mesa dedicada ficou de 7% a 12% menor (395 x 560: 84 → 78 pt de largura) e a da mesa compacta, de 8% a 10% menor; o teste mantém o mínimo de 40 pt no celular pequeno.
+Custo da borda da mesa: o aro tira espaço das cartas, e agora nada avança sobre ele (antes as plaquinhas dos lugares ficavam sobre o couro e passavam do trilho perto dos cantos). Para compensar, o aro ficou um pouco mais fino e as etiquetas de cima e de baixo, mais baixas. Medido com `tableGeometry`: a carta da mesa dedicada em 395 x 560 tem cerca de 71 pt de largura; o teste mantém o mínimo de 38 pt no celular pequeno (344 x 250, metade de cima).
 
 ## Desempenho
 

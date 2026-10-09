@@ -25,6 +25,13 @@ export interface SurfaceMetrics {
   content: Box;
   /** Expoente da superelipse: 2 = elipse; quanto maior, mais perto de um retângulo arredondado. */
   n: number;
+  /**
+   * Raio dos cantos do tampo quando o formato é um retângulo arredondado (bandeja 'panel'); null = superelipse.
+   * A curva da superelipse fica mais funda quanto maior a caixa, então um recuo fixo do conteúdo não
+   * bastava na bandeja: em telas maiores os cantos dos lugares do lobby passavam por cima do aro.
+   * Com raio fixo, o recuo do conteúdo vale em qualquer tamanho.
+   */
+  corner: number | null;
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
@@ -35,21 +42,18 @@ export function insetBox(b: Box, d: number): Box {
 
 /**
  * Medidas da mesa para uma área de `width` x `height`.
- * O aro tira espaço das cartas, então ele é fino na mesa compacta (celular pequeno, metade da tela)
- * e o conteúdo pode encostar no trilho: as etiquetas dos lugares ficam sobre a borda, como plaquinhas.
+ * O aro tira espaço das cartas, então ele é fino na mesa compacta (celular pequeno, metade da tela).
+ * O conteúdo (lugares, cartas) fica sempre dentro do feltro: a geometria da mesa recua o que estiver
+ * perto da curva, para nenhuma etiqueta passar por cima do trilho ou do couro.
  */
 export function surfaceMetrics(width: number, height: number, variant: SurfaceVariant): SurfaceMetrics {
   const min = Math.min(width, height);
-  const tableRim = clamp(min * 0.045, 12, 28);
-  // `overlap`: quanto o conteúdo avança além do feltro. Na mesa dedicada só as plaquinhas encostam nas
-  // bordas (as cartas têm recuo próprio na geometria), então ele vai até o meio do couro: as plaquinhas
-  // ficam sobre o aro, onde cada um senta, e sobra mais espaço para as cartas.
   const cfg =
     variant === 'table'
-      ? { margin: 2, apron: clamp(min * 0.022, 6, 14), rim: tableRim, rail: 3, n: 3.4, overlap: 3 + tableRim / 2 }
+      ? { margin: 2, apron: clamp(min * 0.022, 6, 14), rim: clamp(min * 0.04, 11, 24), rail: 3, n: 3.4, corner: null }
       : variant === 'compact'
-        ? { margin: 1, apron: 4, rim: clamp(min * 0.03, 7, 12), rail: 2, n: 3.6, overlap: 4 }
-        : { margin: 0, apron: 4, rim: 8, rail: 2, n: 8, overlap: 0 };
+        ? { margin: 1, apron: 4, rim: clamp(min * 0.026, 6, 10), rail: 2, n: 3.6, corner: null }
+        : { margin: 0, apron: 4, rim: 8, rail: 2, n: 8, corner: 22 };
 
   const top: Box = {
     x: cfg.margin,
@@ -58,8 +62,47 @@ export function surfaceMetrics(width: number, height: number, variant: SurfaceVa
     h: Math.max(0, height - 2 * cfg.margin - cfg.apron),
   };
   const felt = insetBox(top, cfg.rim + cfg.rail);
-  const content = insetBox(felt, -cfg.overlap);
-  return { top, apron: cfg.apron, rim: cfg.rim, rail: cfg.rail, felt, content, n: cfg.n };
+  return { top, apron: cfg.apron, rim: cfg.rim, rail: cfg.rail, felt, content: felt, n: cfg.n, corner: cfg.corner };
+}
+
+/** Caminho SVG de um retângulo com cantos de raio `r`. */
+export function roundedRectPath(b: Box, r: number): string {
+  const k = Math.max(0, Math.min(r, b.w / 2, b.h / 2));
+  const x2 = b.x + b.w;
+  const y2 = b.y + b.h;
+  return (
+    `M${b.x + k} ${b.y} H${x2 - k} A${k} ${k} 0 0 1 ${x2} ${b.y + k} V${y2 - k} ` +
+    `A${k} ${k} 0 0 1 ${x2 - k} ${y2} H${b.x + k} A${k} ${k} 0 0 1 ${b.x} ${y2 - k} V${b.y + k} ` +
+    `A${k} ${k} 0 0 1 ${b.x + k} ${b.y} Z`
+  );
+}
+
+/**
+ * Contorno do tampo recuado `inset` para dentro: superelipse na mesa, retângulo arredondado na bandeja.
+ * No retângulo, o raio diminui junto com o recuo, para as curvas ficarem paralelas.
+ */
+export function surfacePath(m: SurfaceMetrics, b: Box, inset: number): string {
+  return m.corner === null ? superellipsePath(b, m.n) : roundedRectPath(b, Math.max(2, m.corner - inset));
+}
+
+/**
+ * Quanto a curva da superelipse se afasta do lado reto da caixa, numa posição ao longo desse lado.
+ * `t` é a distância ao meio do lado, normalizada (0 no meio, 1 no canto); `semiAxis` é a metade
+ * da caixa na direção perpendicular ao lado. No meio do lado a profundidade é 0; no canto, `semiAxis`.
+ */
+export function superellipseDepth(t: number, semiAxis: number, n: number): number {
+  const u = Math.min(1, Math.abs(t));
+  return semiAxis * (1 - (1 - u ** n) ** (1 / n));
+}
+
+/** O ponto está dentro da superelipse inscrita em `b`, com folga `margin` das bordas. */
+export function insideSuperellipse(p: { x: number; y: number }, b: Box, n: number, margin = 0): boolean {
+  const a = b.w / 2 - margin;
+  const r = b.h / 2 - margin;
+  if (a <= 0 || r <= 0) return false;
+  const dx = Math.abs(p.x - (b.x + b.w / 2)) / a;
+  const dy = Math.abs(p.y - (b.y + b.h / 2)) / r;
+  return dx ** n + dy ** n <= 1 + 1e-6;
 }
 
 /** Caminho SVG fechado de uma superelipse inscrita em `b`. */

@@ -88,6 +88,17 @@ Cada história tem seus critérios em [PRODUCT_BACKLOG.md](PRODUCT_BACKLOG.md). 
 - [ ] Tocar numa carta a seleciona; "Jogar" confirma; a carta sai da mão e aparece na posição de quem jogou nos outros aparelhos.
 - [ ] Toque duplo rápido em "Jogar" envia uma jogada só.
 - [ ] Pedido de truco: a dupla adversária vê Aceitar, Correr e Pedir SEIS; o parceiro de quem pediu só aguarda; a mesa mostra o pedido.
+- [ ] Pedidos de TRUCO, SEIS, NOVE e DOZE aparecem no centro da mesa como plaquinha vermelha com o valor e a escada da aposta, entrando do lado de quem pediu, e somem sozinhos em cerca de 2,5 s sem deixar resto.
+- [ ] Aceitar mostra o selo dourado "ACEITO!" com o novo valor (só depois da confirmação) e o placar troca para "Vale N".
+- [ ] Pedido e aceite em sequência rápida aparecem na ordem, um de cada vez; nenhum aviso aparece duas vezes.
+- [ ] Reabrir o app ou voltar do segundo plano durante um pedido não reapresenta o aviso; o banner continua mostrando o pedido pendente.
+- [ ] Com truco pendente, nenhum lugar fica destacado como "a vez".
+
+### Layout da mesa e da sala
+
+- [ ] Na sala, em celular pequeno e grande, nenhum lugar encosta no aro da bandeja; nomes longos quebram em duas linhas ou terminam em reticências.
+- [ ] Na mesa (dedicada e compacta), nenhuma etiqueta passa por cima do trilho ou do couro, inclusive perto dos cantos.
+- [ ] O pedido de truco não muda o tamanho da mesa (o banner tem altura fixa).
 
 ## Roteiro de demonstração (4 dispositivos)
 

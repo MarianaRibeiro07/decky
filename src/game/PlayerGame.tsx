@@ -19,7 +19,7 @@ import { seatTeam } from './describe';
 import { playerLayout } from './role';
 import { statusText } from './status';
 import { useDealAnimation } from './useDealAnimation';
-import { useEventBubble } from './useEventBubble';
+import { useTableCue } from './useTableCue';
 
 interface Props {
   match: MatchView;
@@ -42,7 +42,7 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
   const insets = useSafeAreaInsets();
   const state = match.state;
   const deal = useDealAnimation(match.matchId, state);
-  const bubble = useEventBubble(match);
+  const cue = useTableCue(match, connection);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Trava síncrona: dois toques rápidos não chegam a enviar duas ações.
@@ -97,10 +97,10 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
             viewerSeat={mySeat}
             deal={deal}
             variant="compact"
-            bubble={bubble}
+            cue={cue}
           />
         ) : (
-          <PlayerHud state={state} players={players} mySeat={mySeat} deal={deal} bubble={bubble} />
+          <PlayerHud state={state} players={players} mySeat={mySeat} deal={deal} cue={cue} />
         )}
         <StatusBanner
           status={statusText({ state, viewerSeat: mySeat, nameOf, canRespond: legal.respondTruco, phase: deal.phase })}

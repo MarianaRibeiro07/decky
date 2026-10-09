@@ -3,43 +3,83 @@ import { getLegalActions, newMatch, seededRng } from '../../supabase/functions/_
 import { parseAction } from '../../supabase/functions/_shared/match-service.ts';
 import type { MatchView, PublicGameState, Seat } from '../../src/contracts/types';
 import { trucoControls } from '../../src/game/controls';
-import { describeHand, describeTrick, eventBubble, teamLabel } from '../../src/game/describe';
-import { hasOverlap, tableGeometry } from '../../src/game/geometry';
+import { eventCue } from '../../src/game/cue';
+import { describeHand, describeTrick, teamLabel } from '../../src/game/describe';
+import { hasOverlap, tableGeometry, type Rect } from '../../src/game/geometry';
 import { resolveRole } from '../../src/game/role';
 import { statusText } from '../../src/game/status';
-import { superellipsePath, surfaceMetrics } from '../../src/ui/shapes';
+import { insideSuperellipse, roundedRectPath, superellipseDepth, superellipsePath, surfaceMetrics } from '../../src/ui/shapes';
 
 const base = (): PublicGameState => newMatch(seededRng(1)).public;
 const names: Record<Seat, string> = { 1: 'Ana', 2: 'Bia', 3: 'Caio', 4: 'Duda' };
 const nameOf = (seat: Seat) => names[seat];
 
 describe('geometria da mesa', () => {
+  const corners = (r: Rect) => [
+    { x: r.x, y: r.y },
+    { x: r.x + r.w, y: r.y },
+    { x: r.x, y: r.y + r.h },
+    { x: r.x + r.w, y: r.y + r.h },
+  ];
+
   it.each([
     ['celular pequeno, metade de cima', 344, 250, 'compact'],
     ['celular comum, metade de cima', 395, 330, 'compact'],
     ['celular grande, metade de cima', 412, 420, 'compact'],
+    ['celular largo e baixo, metade de cima', 480, 260, 'compact'],
     ['mesa dedicada', 395, 560, 'large'],
+    ['mesa dedicada em celular pequeno', 344, 470, 'large'],
+    ['mesa dedicada em celular bem pequeno (placar compacto)', 320, 380, 'large'],
+    ['mesa dedicada em celular alto', 390, 700, 'large'],
     ['mesa dedicada em tablet', 760, 820, 'large'],
-  ] as const)('%s: lugares, cartas, baralho e vira não se sobrepõem', (_, w, h, variant) => {
+  ] as const)('%s: nada se sobrepõe e tudo fica inteiro dentro do feltro', (_, w, h, variant) => {
     // O conteúdo fica na área do feltro, dentro do aro de couro (como o TableBoard desenha).
-    const area = surfaceMetrics(w, h, variant === 'large' ? 'table' : 'compact').content;
-    const g = tableGeometry(area.w, area.h, variant);
+    const m = surfaceMetrics(w, h, variant === 'large' ? 'table' : 'compact');
+    const area = m.content;
+    const g = tableGeometry(area.w, area.h, variant, m.n);
     expect(hasOverlap(g)).toBe(false);
     // Carta legível mesmo no celular pequeno, já descontado o aro.
-    expect(g.card.w).toBeGreaterThanOrEqual(40);
-    // Tudo dentro da área do feltro.
-    for (const r of [...Object.values(g.chips), ...Object.values(g.played), g.deck, g.vira]) {
-      expect(r.x).toBeGreaterThanOrEqual(0);
-      expect(r.y).toBeGreaterThanOrEqual(0);
-      expect(r.x + r.w).toBeLessThanOrEqual(area.w + 0.001);
-      expect(r.y + r.h).toBeLessThanOrEqual(area.h + 0.001);
+    expect(g.card.w).toBeGreaterThanOrEqual(38);
+    // Os quatro cantos de cada etiqueta e carta ficam dentro da curva do feltro, com folga:
+    // antes as etiquetas passavam por cima do trilho e do couro perto dos cantos da mesa.
+    const felt = { x: 0, y: 0, w: area.w, h: area.h };
+    const visibleChips = (Object.keys(g.chips) as (keyof typeof g.chips)[])
+      .filter((s) => s !== 'bottom' || g.bottomChipVisible)
+      .map((s) => g.chips[s]);
+    for (const r of [...visibleChips, ...Object.values(g.played), g.deck, g.vira, g.manilha, g.stage]) {
+      for (const p of corners(r)) expect(insideSuperellipse(p, felt, m.n, 2)).toBe(true);
     }
   });
 
+  it.each([
+    [344, 250, 'compact'],
+    [395, 330, 'compact'],
+    [395, 560, 'large'],
+    [760, 820, 'large'],
+  ] as const)('palco do centro (%s x %s): cabe o aviso de truco sem tocar em carta jogada', (w, h, variant) => {
+    const m = surfaceMetrics(w, h, variant === 'large' ? 'table' : 'compact');
+    const g = tableGeometry(m.content.w, m.content.h, variant, m.n);
+    // Altura mínima para o selo com o valor ficar legível; o palco cobre baralho e vira, não as cartas jogadas.
+    expect(g.stage.h).toBeGreaterThanOrEqual(42);
+    expect(g.stage.w).toBeGreaterThanOrEqual(100);
+    expect(g.stage.y).toBeGreaterThanOrEqual(g.played.top.y + g.played.top.h);
+    expect(g.stage.y + g.stage.h).toBeLessThanOrEqual(g.played.bottom.y);
+  });
+
+  it('etiquetas: largas em cima e embaixo, em coluna nas laterais', () => {
+    const m = surfaceMetrics(395, 560, 'table');
+    const g = tableGeometry(m.content.w, m.content.h, 'large', m.n);
+    expect(g.chipLayout).toEqual({ top: 'row', bottom: 'row', left: 'column', right: 'column' });
+    expect(g.chips.top.w).toBeGreaterThan(g.chips.left.w);
+    expect(g.chips.left.h).toBeGreaterThan(g.chips.top.h);
+  });
+
   it('a mesa dedicada usa cartas maiores que a metade de cima do jogador', () => {
-    const large = surfaceMetrics(395, 560, 'table').content;
-    const compact = surfaceMetrics(395, 330, 'compact').content;
-    expect(tableGeometry(large.w, large.h, 'large').card.w).toBeGreaterThan(tableGeometry(compact.w, compact.h, 'compact').card.w);
+    const large = surfaceMetrics(395, 560, 'table');
+    const compact = surfaceMetrics(395, 330, 'compact');
+    expect(tableGeometry(large.content.w, large.content.h, 'large', large.n).card.w).toBeGreaterThan(
+      tableGeometry(compact.content.w, compact.content.h, 'compact', compact.n).card.w,
+    );
   });
 });
 
@@ -54,6 +94,22 @@ describe('tampo da mesa', () => {
     expect(m.top.y + m.top.h + m.apron).toBeLessThanOrEqual(560);
     expect(m.content.x).toBeGreaterThanOrEqual(0);
     expect(m.content.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it('profundidade da curva: zero no meio do lado, cresce até o canto', () => {
+    expect(superellipseDepth(0, 100, 3.4)).toBeCloseTo(0, 5);
+    expect(superellipseDepth(1, 100, 3.4)).toBeCloseTo(100, 5);
+    expect(superellipseDepth(0.6, 100, 3.4)).toBeGreaterThan(superellipseDepth(0.3, 100, 3.4));
+    // Mesmo ponto: mais fundo numa mesa maior (por isso o recuo fixo não bastava).
+    expect(superellipseDepth(0.6, 250, 3.4)).toBeGreaterThan(superellipseDepth(0.6, 100, 3.4));
+  });
+
+  it('bandeja (lobby, painel): cantos de raio fixo, iguais em qualquer tamanho', () => {
+    expect(surfaceMetrics(320, 300, 'panel').corner).toBe(surfaceMetrics(760, 900, 'panel').corner);
+    expect(surfaceMetrics(395, 560, 'table').corner).toBeNull();
+    const d = roundedRectPath({ x: 0, y: 0, w: 200, h: 100 }, 12);
+    expect(d.startsWith('M12 0')).toBe(true);
+    expect(d.endsWith('Z')).toBe(true);
   });
 
   it('o aro da mesa dedicada é mais grosso que o da mesa compacta', () => {
@@ -139,22 +195,45 @@ describe('textos da mesa central (visão neutra)', () => {
 
     const truco: PublicGameState = { ...state, truco: { value: 6, requestedBy: 'B', requestedBySeat: 4 } };
     expect(statusText({ state: truco, viewerSeat: null, nameOf, canRespond: false, phase: 'done' })).toMatchObject({
-      main: 'Duda pediu SEIS! Dupla A responde.',
+      main: 'Duda pediu SEIS!',
+      detail: 'Dupla A responde',
       tone: 'truco',
     });
-    expect(statusText({ state: truco, viewerSeat: 1, nameOf, canRespond: true, phase: 'done' })?.main).toBe('Duda pediu SEIS! Responda abaixo.');
+    expect(statusText({ state: truco, viewerSeat: 1, nameOf, canRespond: true, phase: 'done' })).toMatchObject({
+      main: 'Duda pediu SEIS!',
+      detail: 'Responda abaixo',
+    });
+    expect(statusText({ state: truco, viewerSeat: 2, nameOf, canRespond: false, phase: 'done' })?.detail).toBe(
+      'Aguardando a resposta deles',
+    );
     expect(statusText({ state: { ...state, status: 'finished' }, viewerSeat: 1, nameOf, canRespond: false, phase: 'done' })).toBeNull();
   });
 
-  it('falas curtas de truco, aceite e correr; carta jogada não tem fala', () => {
+  it('avisos: pedido, aumento, aceite e correr; carta jogada não tem aviso', () => {
     const state = base();
     const pending: PublicGameState = { ...state, truco: { value: 3, requestedBy: 'A', requestedBySeat: 1 } };
-    expect(eventBubble({ seat: 1, action: 'request_truco' }, pending)).toBe('TRUCO!');
-    expect(eventBubble({ seat: 2, action: 'respond_truco', response: 'accept' }, state)).toBe('Aceito!');
-    expect(eventBubble({ seat: 2, action: 'respond_truco', response: 'refuse' }, state)).toBe('Corro!');
-    expect(eventBubble({ seat: 2, action: 'respond_truco', response: 'raise' }, { ...state, truco: { value: 6, requestedBy: 'B', requestedBySeat: 2 } })).toBe('SEIS!');
-    expect(eventBubble({ seat: 3, action: 'play_card', card: { rank: '4', suit: 'ouros' } }, state)).toBeNull();
-    expect(eventBubble(undefined, state)).toBeNull();
+    expect(eventCue({ seat: 1, action: 'request_truco' }, pending)).toEqual({ kind: 'call', seat: 1, value: 3, raise: false });
+    const raised: PublicGameState = { ...state, handValue: 3, truco: { value: 6, requestedBy: 'B', requestedBySeat: 2 } };
+    expect(eventCue({ seat: 2, action: 'respond_truco', response: 'raise' }, raised)).toEqual({
+      kind: 'call',
+      seat: 2,
+      value: 6,
+      raise: true,
+    });
+    const accepted: PublicGameState = { ...state, handValue: 9, truco: null };
+    expect(eventCue({ seat: 2, action: 'respond_truco', response: 'accept' }, accepted)).toEqual({ kind: 'accept', seat: 2, value: 9 });
+    expect(eventCue({ seat: 2, action: 'respond_truco', response: 'refuse' }, state)).toEqual({ kind: 'speech', seat: 2, text: 'Corro!' });
+    expect(eventCue({ seat: 4, action: 'fold' }, state)).toEqual({ kind: 'speech', seat: 4, text: 'Corro!' });
+    expect(eventCue({ seat: 3, action: 'play_card', card: { rank: '4', suit: 'ouros' } }, state)).toBeNull();
+    expect(eventCue(undefined, state)).toBeNull();
+  });
+
+  it('aviso só com o estado confirmado: pedido sem pedido pendente ou aceite com pedido pendente não aparecem', () => {
+    const state = base();
+    expect(eventCue({ seat: 1, action: 'request_truco' }, { ...state, truco: null })).toBeNull();
+    const stillPending: PublicGameState = { ...state, truco: { value: 6, requestedBy: 'A', requestedBySeat: 1 } };
+    expect(eventCue({ seat: 2, action: 'respond_truco', response: 'accept' }, stillPending)).toBeNull();
+    expect(eventCue({ seat: 2, action: 'respond_truco', response: 'raise' }, { ...state, truco: null })).toBeNull();
   });
 });
 
@@ -167,7 +246,12 @@ describe('papel do aparelho na partida', () => {
     state: base(),
     tableUserId,
   });
-  const players = [1, 2, 3, 4].map((seat) => ({ seat: seat as Seat, team: seat % 2 ? 'A' : 'B', userId: `u${seat}`, displayName: `P${seat}` })) as any;
+  const players = [1, 2, 3, 4].map((seat) => ({
+    seat: seat as Seat,
+    team: seat % 2 ? 'A' : 'B',
+    userId: `u${seat}`,
+    displayName: `P${seat}`,
+  })) as any;
 
   it('jogador da partida joga; a mesa registrada só assiste; o resto não vê', () => {
     expect(resolveRole('u2', match('mesa'), players)).toBe('player');
