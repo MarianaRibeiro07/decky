@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { newMatch, seededRng } from '../../supabase/functions/_shared/engine/index.ts';
 import type { MatchPlayer, MatchView, PrivateHand } from '../../src/contracts/types';
 import { channelTopic } from '../../src/lib/channelTopic';
-import { EMPTY_MATCH_DATA, mergeMatchData, type MatchData } from '../../src/game/matchData';
+import { EMPTY_MATCH_DATA, mergeMatchData, needsHandRead, readFromResult, type MatchData } from '../../src/game/matchData';
 
 const PLAYERS: MatchPlayer[] = [
   { seat: 1, team: 'A', userId: 'u1', displayName: 'Ana' },
@@ -63,6 +63,52 @@ describe('a mesa central nunca guarda mão', () => {
   it('quem não joga nem é a mesa não vê a partida', () => {
     const outsider = mergeMatchData(EMPTY_MATCH_DATA, { match: read(1, 'mesa'), players: playersRead(), hand: null }, 'intruso');
     expect(outsider).toMatchObject({ role: null, notFound: true, hand: null });
+  });
+});
+
+describe('resultado da própria ação aplicado na hora', () => {
+  const start = () => mergeMatchData(EMPTY_MATCH_DATA, { match: read(3), players: playersRead(), hand: handOf(1, 3) }, 'u1');
+
+  it('o estado e a mão que o servidor devolveu entram sem esperar a releitura', () => {
+    const before = start();
+    const state = { ...game.public, currentTurnSeat: 2 as const };
+    const hand = handOf(1, 4);
+    const read4 = readFromResult(before, { ok: true, newRevision: 4, state, hand });
+    expect(read4).not.toBeNull();
+    const after = mergeMatchData(before, read4!, 'u1');
+    expect(after.match).toMatchObject({ revision: 4, matchId: 'm1', roomCode: 'ABC123', state });
+    expect(after.hand).toEqual(hand);
+    // A releitura seguinte, com a mesma revisão, não redesenha nada.
+    expect(mergeMatchData(after, { match: read(4), players: playersRead(), hand: undefined }, 'u1').match).toBe(after.match);
+  });
+
+  it('sem estado na resposta (ação repetida, servidor antigo, erro), a tela relê', () => {
+    const before = start();
+    expect(readFromResult(before, { ok: true, newRevision: 4 })).toBeNull();
+    expect(readFromResult(before, { ok: false, error: 'conflict' })).toBeNull();
+    expect(readFromResult(EMPTY_MATCH_DATA, { ok: true, newRevision: 1, state: game.public })).toBeNull();
+  });
+
+  it('resposta atrasada não volta para uma revisão mais antiga', () => {
+    const now = mergeMatchData(start(), { match: read(6), players: playersRead(), hand: handOf(1, 6) }, 'u1');
+    const late = readFromResult(now, { ok: true, newRevision: 5, state: game.public, hand: handOf(1, 5) })!;
+    expect(mergeMatchData(now, late, 'u1')).toBe(now);
+  });
+});
+
+describe('leitura da mão junto com o estado', () => {
+  it('relê a mão só quando a revisão mudou e a mão paralela não acompanha o estado', () => {
+    // Polling sem mudança: nada a buscar.
+    expect(needsHandRead(true, 5, 5, undefined)).toBe(false);
+    // Revisão nova sem leitura paralela (polling): busca.
+    expect(needsHandRead(true, 5, 6, undefined)).toBe(true);
+    // Aviso do Realtime: a mão paralela já é da revisão do estado (ou mais nova): não busca de novo.
+    expect(needsHandRead(true, 5, 6, handOf(1, 6))).toBe(false);
+    expect(needsHandRead(true, 5, 6, handOf(1, 7))).toBe(false);
+    // Corrida: a mão paralela é mais velha que o estado: relê.
+    expect(needsHandRead(true, 4, 6, handOf(1, 5))).toBe(true);
+    // A mesa (não jogador) nunca busca mão.
+    expect(needsHandRead(false, null, 6, undefined)).toBe(false);
   });
 });
 

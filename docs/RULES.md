@@ -40,6 +40,8 @@ O SPEC marca estas convenções como **provisórias a validar**. Para o motor po
 | D-07 | Desistência (correr) | Qualquer jogador pode correr quando não há pedido de truco pendente; a outra dupla ganha o valor atual da mão. Com truco pendente, correr é recusar | `game.ts`, `fold` e `refuse` | `game.test.ts`, "correr dá ao adversário o valor da mão" |
 | D-08 | Aumento depois de aceite | Só a dupla que aceitou pode pedir o próximo valor. Quem responde também pode aumentar direto ("seis!"), o que aceita o pedido atual | `game.ts`, `raiseRight` e `raise` | `game.test.ts`, "aceite muda o valor..." e "sobe 3, 6, 9, 12" |
 
+| D-09 | Quem decide correr e as apostas altas? | Correr (com ou sem truco pendente) e pedir, aumentar ou aceitar 6, 9 e 12 exigem os dois integrantes da dupla: um pede, o parceiro confirma ou recusa. Enquanto a dupla decide, a partida fica parada. TRUCO (3) e o aceite do 3 continuam individuais | `game.ts`, `teamDecisionFor`, `answerProposal` | `game.test.ts`, "decisão em dupla"; `flow.test.ts`, "decisão em dupla" |
+
 Outras escolhas do motor:
 
 - Pedir truco só na própria vez. Responder pode qualquer jogador da dupla adversária, fora da vez.

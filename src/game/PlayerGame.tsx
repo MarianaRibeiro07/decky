@@ -15,7 +15,7 @@ import { PlayerHud } from './components/PlayerHud';
 import { ScoreBar } from './components/ScoreBar';
 import { ConnectionBanner, StatusBanner } from './components/StatusBanner';
 import { TableBoard } from './components/TableBoard';
-import { seatTeam } from './describe';
+import { proposalNote, seatTeam } from './describe';
 import { playerLayout } from './role';
 import { statusText } from './status';
 import { useDealAnimation } from './useDealAnimation';
@@ -28,6 +28,11 @@ interface Props {
   mySeat: Seat;
   connection: ConnectionStatus;
   refresh: () => Promise<void>;
+  /**
+   * Aplica na hora o estado e a mão que o servidor devolveu para a ação deste aparelho (ver `useMatch`).
+   * Devolve false quando a resposta não trouxe estado; aí a tela relê. Ausente na fixture.
+   */
+  applyResult?: (result: GameResult) => boolean;
   /** Envio da ação. Padrão: a Edge Function submit-action. A fixture de desenvolvimento injeta um simulador local. */
   submit?: (matchId: string, action: GameAction, expectedRevision: number) => Promise<GameResult>;
 }
@@ -37,7 +42,7 @@ interface Props {
  * - sem mesa dedicada: a mesa pública completa (TableBoard);
  * - com mesa dedicada: só o essencial público (PlayerHud). A mesa completa fica no aparelho da mesa.
  */
-export function PlayerGame({ match, hand, players, mySeat, connection, refresh, submit = submitAction }: Props) {
+export function PlayerGame({ match, hand, players, mySeat, connection, refresh, applyResult, submit = submitAction }: Props) {
   useScreenAwake();
   const insets = useSafeAreaInsets();
   const state = match.state;
@@ -69,7 +74,9 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
       // O servidor valida vez, carta e truco; aqui só vai a intenção com a revisão que este aparelho viu.
       const result = await submit(match.matchId, action, match.revision);
       if (!result.ok) setError(errorMessage(result.error));
-      await refresh();
+      // Com o estado na resposta, a tela de quem agiu atualiza sem esperar mais duas leituras.
+      // Sem ele (erro, conflito, ação repetida), relê: o servidor continua sendo a fonte da verdade.
+      if (!applyResult?.(result)) await refresh();
     } finally {
       sending.current = false;
       setBusy(null);
@@ -116,6 +123,9 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
         deal={deal}
         busy={busy}
         error={error}
+        // Mostrado junto com a fala na mesa ("Não!"), pelo mesmo tempo, e só na revisão que a gerou.
+        note={cue && cue.revision === match.revision ? proposalNote(state.lastEvent, mySeat, nameOf) : null}
+        players={players}
         onAct={act}
         bottomInset={insets.bottom}
         size={layout === 'hand' ? 'large' : 'normal'}

@@ -14,7 +14,12 @@ import { surfaceMetrics } from '../../src/ui/shapes';
 function act(state: MatchState, seat: Seat, action: GameAction): MatchState {
   const result = applyAction(state, seat, action, seededRng(99));
   if (!result.ok) throw new Error(`ação recusada: ${result.error}`);
-  return result.state;
+  const proposal = result.state.public.proposal;
+  if (!proposal) return result.state;
+  // Decisão da dupla (correr, 6, 9, 12): o pedido aberto não anuncia nada; o parceiro confirma.
+  expect(eventCue(result.state.public.lastEvent, result.state.public)).toBeNull();
+  const partner = (((seat + 1) % 4) + 1) as Seat;
+  return act(result.state, partner, { type: 'confirm_proposal', proposalId: proposal.id });
 }
 
 describe('avisos acompanham a disputa de truco real (motor)', () => {

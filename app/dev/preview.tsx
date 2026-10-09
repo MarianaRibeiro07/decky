@@ -30,7 +30,7 @@ const LONG_PLAYERS: MatchPlayer[] = [
   { seat: 4, team: 'B', userId: 'u4', displayName: 'Maria Eduarda Sant’Anna' },
 ];
 
-type Quick = 'truco' | 'accept' | 'refuse' | 'play';
+type Quick = 'truco' | 'accept' | 'refuse' | 'play' | 'partner';
 
 type View_ = Seat | 'table' | 'lobby';
 
@@ -86,6 +86,13 @@ function Fixture() {
     const current = gameRef.current;
     const pub = current.state.public;
     if (pub.status !== 'playing') return;
+    // Decisão da dupla em aberto: o parceiro de quem pediu confirma.
+    if (kind === 'partner') {
+      if (!pub.proposal) return;
+      const partner = (((pub.proposal.proposedBy + 1) % 4) + 1) as Seat;
+      commit(applyAction(current.state, partner, { type: 'confirm_proposal', proposalId: pub.proposal.id }, rng));
+      return;
+    }
     const responder = pub.truco ? (((pub.truco.requestedBySeat % 4) + 1) as Seat) : pub.currentTurnSeat;
     const legal = getLegalActions(pub, responder);
     let action: GameAction | null = null;
@@ -96,9 +103,12 @@ function Fixture() {
     else if (kind === 'refuse') action = pub.truco ? { type: 'respond_truco', response: 'refuse' } : { type: 'fold' };
     else if (kind === 'play' && legal.playCard) action = { type: 'play_card', card: current.state.hands[responder - 1][0] };
     if (!action) return;
-    const result = applyAction(current.state, responder, action, rng);
+    commit(applyAction(current.state, responder, action, rng));
+  }
+
+  function commit(result: ReturnType<typeof applyAction>) {
     if (!result.ok) return;
-    const next = { state: result.state, revision: current.revision + 1 };
+    const next = { state: result.state, revision: gameRef.current.revision + 1 };
     gameRef.current = next;
     setGame(next);
   }
@@ -147,6 +157,7 @@ function Fixture() {
               ['accept', 'Aceitar'],
               ['refuse', 'Correr'],
               ['play', 'Jogar'],
+              ['partner', 'Dupla ✓'],
             ] as [Quick, string][]
           ).map(([kind, label]) => (
             <Pressable

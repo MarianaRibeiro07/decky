@@ -1,6 +1,17 @@
 // Textos curtos da mesa. Para um jogador, do ponto de vista dele ("Nós" e "Eles");
 // para a mesa central (viewerTeam = null), neutros ("Dupla A" e "Dupla B").
-import type { HandSummary, PublicGameState, Seat, TableCard, Team, TrickResult } from '../contracts/types';
+import type {
+  HandSummary,
+  PublicEvent,
+  PublicGameState,
+  Seat,
+  TableCard,
+  Team,
+  TeamDecision,
+  TeamProposal,
+  TrickResult,
+  TrucoRequest,
+} from '../contracts/types';
 
 const TRUCO_NAMES: Record<number, string> = { 3: 'TRUCO', 6: 'SEIS', 9: 'NOVE', 12: 'DOZE' };
 
@@ -86,7 +97,61 @@ export function initials(name: string): string {
  * não deve se confundir com o aviso de truco).
  */
 export function activeTurnSeat(state: PublicGameState, dealing: boolean): Seat | null {
-  return state.status === 'playing' && !dealing && !state.truco ? state.currentTurnSeat : null;
+  // Com a dupla decidindo (correr, 6, 9, 12) a partida também para: ninguém está "na vez".
+  return state.status === 'playing' && !dealing && !state.truco && !state.proposal ? state.currentTurnSeat : null;
+}
+
+const points = (n: number) => `${n} ${n === 1 ? 'ponto' : 'pontos'}`;
+
+/** O que a dupla está decidindo, como verbo: "correr", "aceitar o SEIS", "pedir NOVE". */
+export function proposalVerb(proposal: TeamProposal, truco: TrucoRequest | null | undefined): string {
+  switch (proposal.decision) {
+    case 'fold':
+      return 'correr';
+    case 'refuse':
+      return truco ? `correr do ${trucoName(truco.value)}` : 'correr';
+    case 'accept':
+      return `aceitar o ${trucoName(proposal.value)}`;
+    default:
+      return `pedir ${trucoName(proposal.value)}`;
+  }
+}
+
+/** O que está em jogo no pedido, igual para os dois integrantes. */
+export function proposalStake(proposal: TeamProposal): string {
+  switch (proposal.decision) {
+    case 'fold':
+    case 'refuse':
+      return `a outra dupla ganha ${points(proposal.value)}`;
+    case 'accept':
+      return `a mão passa a valer ${proposal.value}`;
+    default:
+      return `a mão pode passar a valer ${proposal.value}`;
+  }
+}
+
+const DECISION_SHORT: Record<TeamDecision, string> = {
+  fold: 'correr',
+  refuse: 'correr',
+  accept: 'aceitar o aumento',
+  raise: 'aumentar a aposta',
+  request_truco: 'aumentar a aposta',
+};
+
+/**
+ * Aviso curto para a dupla quando um pedido dela acaba sem efeito por ação de outra pessoa:
+ * o parceiro recusou ou desistiu, ou o pedido deixou de valer. Para a outra dupla e para a mesa,
+ * nada (a fala na mesa já basta). Quem recusou ou desistiu não precisa ser avisado do que fez.
+ */
+export function proposalNote(event: PublicEvent | null | undefined, viewerSeat: Seat, nameOf: (seat: Seat) => string): string | null {
+  const p = event?.proposal;
+  if (!p || seatTeam(p.by) !== seatTeam(viewerSeat)) return null;
+  if (p.status === 'invalidated') return 'O pedido da dupla não vale mais e foi cancelado.';
+  if (p.by === viewerSeat) return null;
+  const who = shortName(nameOf(p.by));
+  if (p.status === 'rejected') return `${who} não quis ${DECISION_SHORT[p.decision]}. A mão continua.`;
+  if (p.status === 'cancelled') return `${who} desistiu de ${DECISION_SHORT[p.decision]}.`;
+  return null;
 }
 
 export type Side = 'bottom' | 'right' | 'top' | 'left';

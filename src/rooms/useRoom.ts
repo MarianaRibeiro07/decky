@@ -12,6 +12,17 @@ export interface RoomState {
   loaded: boolean;
 }
 
+/** Mesma sala, mesmos lugares e mesma partida (os objetos vêm novos a cada leitura). */
+export function sameRoomState(a: RoomState, b: RoomState): boolean {
+  return (
+    a.loaded === b.loaded &&
+    a.gone === b.gone &&
+    a.activeMatchId === b.activeMatchId &&
+    JSON.stringify(a.room) === JSON.stringify(b.room) &&
+    JSON.stringify(a.seats) === JSON.stringify(b.seats)
+  );
+}
+
 /** Lobby em tempo real: sala, posições e partida em andamento. */
 export function useRoom(code: string | undefined) {
   const [state, setState] = useState<RoomState>({ room: null, seats: [], activeMatchId: null, gone: false, loaded: false });
@@ -27,7 +38,9 @@ export function useRoom(code: string | undefined) {
       fetchSeats(room.id),
       room.status === 'playing' ? fetchActiveMatchId(room.id) : Promise.resolve(null),
     ]);
-    setState({ room, seats, activeMatchId, gone: false, loaded: true });
+    const next: RoomState = { room, seats, activeMatchId, gone: false, loaded: true };
+    // Polling a cada 3 s quase sempre traz a mesma sala: sem mudança, mantém o objeto e o lobby não redesenha.
+    setState((prev) => (sameRoomState(prev, next) ? prev : next));
   }, [code]);
 
   const roomId = state.room?.id;

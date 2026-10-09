@@ -1,19 +1,20 @@
 // Quais botões de truco aparecem para quem está jogando. Só espelha getLegalActions do motor:
 // o servidor valida de novo cada ação, então esconder botão aqui é conforto, não segurança.
-import type { LegalActions } from '../../supabase/functions/_shared/engine/game.ts';
-import type { GameAction, PublicGameState } from '../contracts/types';
-import { nextTrucoValue, trucoName } from './describe';
+import { teamDecisionFor, type LegalActions } from '../../supabase/functions/_shared/engine/game.ts';
+import type { GameAction, PublicGameState, Seat } from '../contracts/types';
+import { nextTrucoValue, proposalStake, proposalVerb, trucoName } from './describe';
 
-export type ControlId = 'request' | 'accept' | 'refuse' | 'raise' | 'fold';
+export type ControlId = 'request' | 'accept' | 'refuse' | 'raise' | 'fold' | 'confirm' | 'reject' | 'cancel';
 
 export interface Control {
   id: ControlId;
   label: string;
   hint: string;
   variant: 'primary' | 'secondary' | 'dark' | 'gold';
-  /** Ação enviada ao servidor. Correr sem pedido pendente pede confirmação antes. */
+  /** Ação enviada ao servidor. */
   action: GameAction;
-  confirm: boolean;
+  /** A ação só vale com o parceiro: o botão abre um pedido de confirmação da dupla. */
+  needsPartner: boolean;
 }
 
 export type ControlsMode =
@@ -23,66 +24,111 @@ export type ControlsMode =
   | 'waiting_answer'
   /** Jogo normal: jogar carta, pedir truco, correr. */
   | 'play'
+  /** O parceiro pediu uma decisão da dupla: confirmar ou recusar. */
+  | 'proposal_confirm'
+  /** Este jogador pediu uma decisão da dupla: aguardar o parceiro (ou desistir). */
+  | 'proposal_sent'
+  /** A outra dupla está decidindo: só aguardar. */
+  | 'proposal_other'
   | 'none';
 
-export function trucoControls(state: PublicGameState, legal: LegalActions): { mode: ControlsMode; controls: Control[] } {
+const PARTNER_HINT = ' Seu parceiro precisa confirmar.';
+
+export function trucoControls(
+  state: PublicGameState,
+  legal: LegalActions,
+  seat: Seat,
+): { mode: ControlsMode; controls: Control[] } {
   if (state.status !== 'playing') return { mode: 'none', controls: [] };
+
+  // Botão de uma ação comum, já dizendo se ela vai precisar do parceiro.
+  const control = (id: ControlId, label: string, hint: string, variant: Control['variant'], action: GameAction): Control => {
+    const needsPartner = teamDecisionFor(state, seat, action) !== null;
+    return { id, label, hint: needsPartner ? hint + PARTNER_HINT : hint, variant, action, needsPartner };
+  };
+
+  const proposal = state.proposal ?? null;
+  if (proposal) {
+    if (legal.confirmProposal) {
+      const verb = proposalVerb(proposal, state.truco);
+      return {
+        mode: 'proposal_confirm',
+        controls: [
+          {
+            id: 'reject',
+            label: 'Não',
+            hint: `Recusa ${verb}; a mão continua`,
+            variant: 'secondary',
+            action: { type: 'reject_proposal', proposalId: proposal.id },
+            needsPartner: false,
+          },
+          {
+            id: 'confirm',
+            label: `Confirmar`,
+            hint: `Confirma ${verb}: ${proposalStake(proposal)}`,
+            variant: proposal.decision === 'fold' || proposal.decision === 'refuse' ? 'primary' : 'gold',
+            action: { type: 'confirm_proposal', proposalId: proposal.id },
+            needsPartner: false,
+          },
+        ],
+      };
+    }
+    if (legal.rejectProposal) {
+      return {
+        mode: 'proposal_sent',
+        controls: [
+          {
+            id: 'cancel',
+            label: 'Desistir do pedido',
+            hint: 'Cancela o pedido antes de o parceiro responder',
+            variant: 'secondary',
+            action: { type: 'reject_proposal', proposalId: proposal.id },
+            needsPartner: false,
+          },
+        ],
+      };
+    }
+    return { mode: 'proposal_other', controls: [] };
+  }
 
   if (state.truco) {
     if (!legal.respondTruco) return { mode: 'waiting_answer', controls: [] };
     const value = state.truco.value;
     const controls: Control[] = [
-      {
-        id: 'accept',
-        label: 'Aceitar',
-        hint: `A mão passa a valer ${value}`,
-        variant: 'dark',
-        action: { type: 'respond_truco', response: 'accept' },
-        confirm: false,
-      },
-      {
-        id: 'refuse',
-        label: 'Correr',
-        hint: `A outra dupla ganha ${state.handValue} ${state.handValue === 1 ? 'ponto' : 'pontos'}`,
-        variant: 'secondary',
-        action: { type: 'respond_truco', response: 'refuse' },
-        confirm: false,
-      },
+      control('accept', 'Aceitar', `A mão passa a valer ${value}.`, 'dark', { type: 'respond_truco', response: 'accept' }),
+      control(
+        'refuse',
+        'Correr',
+        `A outra dupla ganha ${state.handValue} ${state.handValue === 1 ? 'ponto' : 'pontos'}.`,
+        'secondary',
+        { type: 'respond_truco', response: 'refuse' },
+      ),
     ];
     if (legal.raiseTruco) {
       const raised = nextTrucoValue(value);
-      controls.push({
-        id: 'raise',
-        label: `Pedir ${trucoName(raised)}`,
-        hint: `Aceita o ${trucoName(value).toLowerCase()} e pede para a mão valer ${raised}`,
-        variant: 'gold',
-        action: { type: 'respond_truco', response: 'raise' },
-        confirm: false,
-      });
+      controls.push(
+        control(
+          'raise',
+          `Pedir ${trucoName(raised)}`,
+          `Aceita o ${trucoName(value).toLowerCase()} e pede para a mão valer ${raised}.`,
+          'gold',
+          { type: 'respond_truco', response: 'raise' },
+        ),
+      );
     }
     return { mode: 'respond', controls };
   }
 
   const controls: Control[] = [];
   if (legal.requestTruco && legal.nextTrucoValue) {
-    controls.push({
-      id: 'request',
-      label: `Pedir ${trucoName(legal.nextTrucoValue)}`,
-      hint: `Pede para a mão valer ${legal.nextTrucoValue}`,
-      variant: 'gold',
-      action: { type: 'request_truco' },
-      confirm: false,
-    });
+    controls.push(
+      control('request', `Pedir ${trucoName(legal.nextTrucoValue)}`, `Pede para a mão valer ${legal.nextTrucoValue}.`, 'gold', {
+        type: 'request_truco',
+      }),
+    );
   }
   if (legal.fold) {
-    controls.push({
-      id: 'fold',
-      label: 'Correr',
-      hint: 'Desiste da mão; a outra dupla ganha os pontos',
-      variant: 'secondary',
-      action: { type: 'fold' },
-      confirm: true,
-    });
+    controls.push(control('fold', 'Correr', 'Desiste da mão; a outra dupla ganha os pontos.', 'secondary', { type: 'fold' }));
   }
   return { mode: 'play', controls };
 }

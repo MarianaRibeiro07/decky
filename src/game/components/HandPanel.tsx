@@ -10,18 +10,20 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import type { LegalActions } from '../../../supabase/functions/_shared/engine/game.ts';
-import type { Card, GameAction, PrivateHand, PublicGameState, Rank, Seat } from '../../contracts/types';
+import type { Card, GameAction, MatchPlayer, PrivateHand, PublicGameState, Rank, Seat, TeamProposal } from '../../contracts/types';
 import { useRerenderAt } from '../../lib/useRerenderAt';
 import { Button } from '../../ui/Button';
 import type { IconName } from '../../ui/icons';
 import { Notice } from '../../ui/Notice';
 import { CARD_RATIO, cardLabel, PlayingCard, sealSize } from '../../ui/PlayingCard';
-import { colors, font, radius, space } from '../../ui/theme';
+import { colors, font, radius, space, TOUCH_MIN } from '../../ui/theme';
 import { trucoControls, type Control, type ControlId } from '../controls';
+import { initials, seatTeam, shortName } from '../describe';
 import { arrivedCards, landingMoments, type DealRun } from '../deal';
 import { cardKey as keyOf, manilhaReveals, revealMoments, revealProgress, showsManilha, type ManilhaReveal as Reveal } from '../manilha';
 import type { DealAnimation } from '../useDealAnimation';
 import { ManilhaReveal } from './ManilhaReveal';
+import { PlayerAvatar } from './PlayerIdentity';
 
 const NO_MOMENTS: number[] = [];
 
@@ -31,7 +33,27 @@ const CONTROL_ICONS: Record<ControlId, IconName> = {
   accept: 'accept',
   refuse: 'fold',
   fold: 'fold',
+  confirm: 'accept',
+  reject: 'no',
+  cancel: 'no',
 };
+
+/** Recuo lateral do painel: menor sem mesa dedicada, para a mão ganhar largura. */
+const panelPadding = (size: 'normal' | 'large') => (size === 'large' ? space.md : space.sm + 4);
+const HAND_GAP = space.sm;
+
+/**
+ * Largura de cada carta da mão. Três cartas lado a lado na largura do painel, limitadas por uma fração
+ * da altura da tela (para a mesa continuar com espaço) e por um teto.
+ * - 'normal' (sem mesa dedicada: a mesa fica em cima): até 124 pt e 14% da altura. Antes eram 112 pt e
+ *   13%, e a mão ficava apertada; num celular de 390 x 844 a carta passa de ~110 para ~118 pt.
+ * - 'large' (com mesa dedicada: a mão ocupa a tela): sem mudança.
+ */
+export function handCardWidth(width: number, height: number, size: 'normal' | 'large'): number {
+  const large = size === 'large';
+  const fromWidth = (width - panelPadding(size) * 2 - HAND_GAP * 2) / 3;
+  return Math.min(large ? 150 : 124, fromWidth, height * (large ? 0.21 : 0.14));
+}
 
 /**
  * Quantas cartas da própria mão já "chegaram" na distribuição animada. Calculado no render
@@ -68,6 +90,9 @@ interface Props {
   /** Chave da ação em envio (desabilita tudo e mostra carregando no botão certo). */
   busy: string | null;
   error: string | null;
+  /** Aviso curto da dupla (o parceiro recusou o pedido, o pedido deixou de valer). */
+  note: string | null;
+  players: MatchPlayer[];
   onAct: (key: string, action: GameAction) => void;
   /** Área segura de baixo (barra de gestos), somada ao espaçamento do painel. */
   bottomInset: number;
@@ -84,15 +109,14 @@ interface Props {
  * este aparelho recebe) e a manilha pública. Ao receber a mão, cada manilha ganha uma revelação
  * especial depois que a vira abre; ela não bloqueia a jogada e não se repete (ver `manilhaReveals`).
  */
-export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct, bottomInset, size = 'normal' }: Props) {
+export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, note, players, onAct, bottomInset, size = 'normal' }: Props) {
   const { width, height } = useWindowDimensions();
   const [selected, setSelected] = useState<string | null>(null);
-  const [confirmFold, setConfirmFold] = useState(false);
 
   const cards = hand?.cards ?? [];
   const dealing = deal.phase === 'intro' || deal.phase === 'dealing';
   const canPlay = legal.playCard && !busy && !dealing;
-  const { mode, controls } = trucoControls(state, legal);
+  const { mode, controls } = trucoControls(state, legal, mySeat);
   const selectedCard = cards.find((c) => keyOf(c) === selected) ?? null;
 
   // A seleção some quando a carta sai da mão (jogada aceita ou mão nova) ou quando surge um pedido de truco.
@@ -100,14 +124,10 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
     if (selected && !cards.some((c) => keyOf(c) === selected)) setSelected(null);
   }, [cards, selected]);
   useEffect(() => {
-    if (state.truco) {
-      setSelected(null);
-      setConfirmFold(false);
-    }
+    if (state.truco) setSelected(null);
   }, [state.truco]);
 
-  const large = size === 'large';
-  const cardW = Math.min(large ? 150 : 112, (width - space.md * 2 - space.sm * 2) / 3, height * (large ? 0.21 : 0.13));
+  const cardW = handCardWidth(width, height, size);
   const reveals = useManilhaReveals(deal.run, cards, state.manilhaRank);
   const now = Date.now();
 
@@ -122,14 +142,13 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
   }
 
   function press(control: Control) {
-    if (control.confirm) setConfirmFold(true);
-    else onAct(control.id, control.action);
+    onAct(control.id, control.action);
   }
 
   const arrived = useArrivedCards(deal, dealing, state.dealerSeat, mySeat);
 
   return (
-    <View style={[styles.panel, { paddingBottom: space.sm + bottomInset }]}>
+    <View style={[styles.panel, { paddingBottom: space.sm + bottomInset, paddingHorizontal: panelPadding(size) }]}>
       <Notice kind="error" message={error} />
 
       {/* Abrir a tela ou reconectar não refaz a entrada das cartas que já estavam na mão. */}
@@ -184,30 +203,20 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
         </View>
       </LayoutAnimationConfig>
 
-      {confirmFold ? (
-        <Animated.View entering={FadeIn.duration(150)} style={styles.confirm}>
-          <Text style={styles.confirmText}>
-            Correr? A outra dupla ganha {state.maoDeOnze === (mySeat % 2 === 1 ? 'A' : 'B') ? 1 : state.handValue}{' '}
-            ponto(s) e começa outra mão.
-          </Text>
-          <View style={styles.row}>
-            <Button label="Continuar jogando" variant="secondary" size="compact" style={styles.grow} onPress={() => setConfirmFold(false)} />
-            <Button
-              label="Correr"
-              hint="Confirma: desiste da mão"
-              icon="fold"
-              variant="primary"
-              size="compact"
-              style={styles.grow}
-              loading={busy === 'fold'}
-              disabled={!!busy}
-              onPress={() => {
-                setConfirmFold(false);
-                onAct('fold', { type: 'fold' });
-              }}
-            />
-          </View>
-        </Animated.View>
+      <Notice kind="info" message={note} />
+
+      {mode === 'proposal_confirm' || mode === 'proposal_sent' ? (
+        // Decisão da dupla: quem já confirmou (avatares) e o que falta fazer, na mesma altura da fileira
+        // de botões, para a mesa não mudar de tamanho. O que está em jogo vai no banner de status.
+        <View style={styles.row} accessibilityLabel="Decisão da dupla">
+          <ProposalMembers proposal={state.proposal!} mySeat={mySeat} players={players} />
+          {controls.map((c) => (
+            <Button key={c.id} label={c.label} hint={c.hint} icon={CONTROL_ICONS[c.id]} variant={c.variant} size="compact"
+              style={c.id === 'confirm' ? styles.play : styles.grow} loading={busy === c.id} disabled={!!busy} onPress={() => press(c)} />
+          ))}
+        </View>
+      ) : mode === 'proposal_other' ? (
+        <WaitingLine text="A outra dupla está decidindo…" />
       ) : mode === 'respond' ? (
         <View style={styles.row} accessibilityLabel="Responder ao pedido de truco">
           {controls.map((c) => (
@@ -216,7 +225,7 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
           ))}
         </View>
       ) : mode === 'waiting_answer' ? (
-        <Text style={styles.waiting}>Pedido feito. Aguardando a outra dupla responder…</Text>
+        <WaitingLine text="Pedido feito. Aguardando a outra dupla responder…" />
       ) : mode === 'play' ? (
         // Correr à esquerda, longe do polegar; jogar à direita, maior e preenchido: é a ação principal.
         <View style={styles.row}>
@@ -238,6 +247,54 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
           />
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * Quem da dupla já confirmou o pedido: avatar com visto dourado para quem confirmou (quem pediu conta
+ * como a primeira confirmação) e contorno apagado para quem ainda não respondeu, mais "1 de 2".
+ */
+function ProposalMembers({ proposal, mySeat, players }: { proposal: TeamProposal; mySeat: Seat; players: MatchPlayer[] }) {
+  const partnerSeat = (((proposal.proposedBy + 1) % 4) + 1) as Seat;
+  const nameOf = (seat: Seat) => players.find((p) => p.seat === seat)?.displayName ?? `Lugar ${seat}`;
+  const label = (seat: Seat) => (seat === mySeat ? 'você' : shortName(nameOf(seat)));
+  const members: { seat: Seat; done: boolean }[] = [
+    { seat: proposal.proposedBy, done: true },
+    { seat: partnerSeat, done: false },
+  ];
+  return (
+    <View
+      style={styles.members}
+      accessible
+      accessibilityLabel={`Confirmações da dupla: 1 de 2. ${label(proposal.proposedBy)} confirmou; falta ${label(partnerSeat)}.`}
+    >
+      <View style={styles.memberRow}>
+        {members.map((m) => (
+          <View key={m.seat} style={[styles.member, !m.done && styles.memberWaiting]}>
+            <PlayerAvatar initials={initials(nameOf(m.seat))} team={seatTeam(m.seat)} size={26} active={m.done} />
+            <View style={[styles.memberMark, m.done ? styles.memberDone : styles.memberPending]}>
+              <Text style={[styles.memberMarkText, !m.done && styles.memberMarkPending]} allowFontScaling={false}>
+                {m.done ? '✓' : '…'}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+      <Text style={styles.memberCount} allowFontScaling={false}>
+        1 DE 2
+      </Text>
+    </View>
+  );
+}
+
+/** Linha de espera com a altura da fileira de botões: trocar de modo não muda o tamanho do painel. */
+function WaitingLine({ text }: { text: string }) {
+  return (
+    <View style={styles.waitingBox} accessibilityLiveRegion="polite">
+      <Text style={styles.waiting} numberOfLines={2}>
+        {text}
+      </Text>
     </View>
   );
 }
@@ -265,7 +322,6 @@ const styles = StyleSheet.create({
   // Bandeja de couro na frente do jogador: grafite, filete metálico em cima e luz vindo da mesa.
   panel: {
     backgroundColor: colors.surface,
-    paddingHorizontal: space.md,
     paddingTop: space.sm,
     gap: space.sm,
     borderTopLeftRadius: radius.lg,
@@ -274,7 +330,7 @@ const styles = StyleSheet.create({
     borderColor: colors.lineStrong,
     boxShadow: '0px -8px 18px rgba(0, 0, 0, 0.55)',
   },
-  hand: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', gap: space.sm },
+  hand: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', gap: HAND_GAP },
   slot: { alignItems: 'center' },
   empty: { fontSize: font.body, color: colors.textMuted, alignSelf: 'center', textAlign: 'center' },
   row: { flexDirection: 'row', gap: space.sm },
@@ -282,7 +338,36 @@ const styles = StyleSheet.create({
   truco: { flex: 1.1 },
   fold: { flex: 0.8 },
   play: { flex: 1.4 },
-  waiting: { fontSize: font.body, color: colors.goldSoft, fontWeight: '700', textAlign: 'center', paddingVertical: space.sm },
-  confirm: { gap: space.sm },
-  confirmText: { fontSize: font.body - 1, color: colors.text, fontWeight: '700', textAlign: 'center' },
+  waitingBox: { height: TOUCH_MIN + 4, justifyContent: 'center' },
+  waiting: { fontSize: font.body - 2, lineHeight: 21, color: colors.goldSoft, fontWeight: '700', textAlign: 'center' },
+  members: {
+    flex: 0.9,
+    minHeight: TOUCH_MIN + 4,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.goldDeep,
+    backgroundColor: '#1C1810',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  memberRow: { flexDirection: 'row', gap: 6 },
+  member: { alignItems: 'center' },
+  memberWaiting: { opacity: 0.55 },
+  memberMark: {
+    position: 'absolute',
+    right: -4,
+    bottom: -3,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  memberDone: { backgroundColor: colors.gold, borderColor: colors.ink },
+  memberPending: { backgroundColor: colors.surface, borderColor: colors.lineStrong },
+  memberMarkText: { color: colors.ink, fontSize: 9, lineHeight: 11, fontWeight: '900' },
+  memberMarkPending: { color: colors.textMuted },
+  memberCount: { color: colors.goldSoft, fontSize: 9.5, fontWeight: '900', letterSpacing: 0.8 },
 });

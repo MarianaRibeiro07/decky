@@ -16,7 +16,7 @@ import { colors } from '../../src/ui/theme';
 export default function Game() {
   const { matchId } = useLocalSearchParams<{ matchId: string }>();
   const { userId } = useAuth();
-  const { match, hand, players, role, loaded, notFound, connection, refresh } = useMatch(matchId, userId);
+  const { match, hand, players, role, loaded, notFound, connection, refresh, applyResult } = useMatch(matchId, userId);
 
   if (!loaded) {
     return (
@@ -48,7 +48,17 @@ export default function Game() {
     );
   }
 
-  return <PlayerGame match={match} hand={hand} players={players} mySeat={mySeat} connection={connection} refresh={refresh} />;
+  return (
+    <PlayerGame
+      match={match}
+      hand={hand}
+      players={players}
+      mySeat={mySeat}
+      connection={connection}
+      refresh={refresh}
+      applyResult={applyResult}
+    />
+  );
 }
 
 const styles = StyleSheet.create({

@@ -33,6 +33,12 @@ export function parseAction(value: unknown): GameAction | null {
         : null;
     case 'fold':
       return { type: 'fold' };
+    case 'confirm_proposal':
+    case 'reject_proposal':
+      // O número liga a resposta a um pedido específico; o motor confere se é o pedido em aberto.
+      return Number.isSafeInteger(action.proposalId) && action.proposalId > 0
+        ? { type: action.type, proposalId: action.proposalId }
+        : null;
     default:
       return null;
   }
@@ -60,6 +66,7 @@ export async function startMatchService(rpc: Rpc, userId: string, body: any, rng
 
 /**
  * POST { matchId, action, expectedRevision, clientActionId } -> GameResult
+ * (no sucesso, também o estado público novo e a mão de quem agiu; numa ação repetida, só a revisão)
  * 1. Lê o estado completo (já respondendo se a ação é repetida).
  * 2. Confere a revisão que o cliente viu.
  * 3. Aplica a regra no motor.
@@ -102,5 +109,14 @@ export async function submitActionService(rpc: Rpc, userId: string, body: any, r
     p_client_action_id: clientActionId,
   });
 
-  return ok(saved.ok ? { ok: true, newRevision: saved.newRevision } : { ok: false, error: saved.error });
+  if (!saved.ok) return ok({ ok: false, error: saved.error });
+  // Quem agiu já recebe o estado público gravado e a PRÓPRIA mão: a tela dele atualiza sem esperar
+  // mais duas leituras (matches e get_my_hand). Os outros continuam recebendo pelo Realtime.
+  // Nada de mão alheia sai daqui: só `hands[seat - 1]`, a mesma que get_my_hand devolveria.
+  return ok({
+    ok: true,
+    newRevision: saved.newRevision,
+    state: result.state.public,
+    hand: { revision: saved.newRevision, seat: loaded.seat, cards: result.state.hands[loaded.seat - 1] },
+  });
 }

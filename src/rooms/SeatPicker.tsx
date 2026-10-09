@@ -4,9 +4,10 @@ import type { RoomSeat, Seat } from '../contracts/types';
 import { PlayerAvatar, TeamTag } from '../game/components/PlayerIdentity';
 import { initials, seatTeam } from '../game/describe';
 import { FeltPanel } from '../ui/TableSurface';
-import { colors, font, radius, space, TOUCH_MIN } from '../ui/theme';
+import { colors, font, radius, space } from '../ui/theme';
 
 // Grade em volta da mesa: parceiros ficam na diagonal (1 e 3, 2 e 4).
+const SEAT_MIN_H = 112;
 const GRID: Seat[][] = [
   [1, 2],
   [4, 3],
@@ -25,8 +26,10 @@ interface Props {
 
 /**
  * Lugares da sala sobre a bandeja de feltro. Cada lugar mostra avatar (ficha com as iniciais na cor da
- * dupla), nome, dupla e se está pronto; os marcadores (você, dono da sala) ficam em selos próprios em vez
- * de colados no nome, para um nome longo não esconder "(você)" nas reticências.
+ * dupla), nome, dupla e se está pronto. Os marcadores (você, dono da sala) são selos na linha da dupla,
+ * logo abaixo do nome: ficam junto de quem marcam e um nome longo não os esconde nas reticências.
+ * Antes eles tinham uma linha própria embaixo, que sobrava vazia em quem não tinha selo e deixava
+ * "VOCÊ" solto no pé do cartão.
  * A bandeja tem cantos de raio fixo e recuo próprio: nenhum lugar encosta no aro, em qualquer tela.
  */
 export function SeatPicker({ seats, mySeat, hostId, disabled, canSit, onSit }: Props) {
@@ -82,6 +85,13 @@ function SeatBox({ seat, player, isMe, narrow, hostId, disabled, canSit, onSit }
   const header = `Lugar ${seat}, dupla ${team}`;
 
   if (!player) {
+    // Mesma estrutura do lugar ocupado (cabeçalho com o estado, marca no lugar do avatar, "Livre" no
+    // lugar do nome e a dupla embaixo): os quatro cartões ficam com a mesma altura e o mesmo alinhamento.
+    const hint = (
+      <Text style={[styles.freeHint, narrow && styles.center]} numberOfLines={1}>
+        {canSit ? 'Toque para sentar' : 'Aguardando jogador'}
+      </Text>
+    );
     return (
       <Pressable
         style={({ pressed }) => [styles.seat, styles.seatFree, pressed && styles.seatPressed]}
@@ -90,22 +100,35 @@ function SeatBox({ seat, player, isMe, narrow, hostId, disabled, canSit, onSit }
         accessibilityRole="button"
         accessibilityLabel={`${header}, livre.${canSit ? ' Toque para sentar aqui' : ' Aguardando jogador'}`}
       >
-        <Text style={[styles.seatHeader, styles.seatHeaderTaken]} numberOfLines={1}>
-          LUGAR {seat}
-        </Text>
-        <View style={[styles.freeMark, { borderColor: teamColor }]}>
-          <Text style={[styles.freePlus, { color: teamColor }]}>+</Text>
+        <View style={[styles.headerRow, narrow && styles.headerRowNarrow]}>
+          <Text style={[styles.seatHeader, styles.seatHeaderTaken]} numberOfLines={1}>
+            LUGAR {seat}
+          </Text>
         </View>
-        <Text style={styles.free}>Livre</Text>
-        <TeamTag team={team} text={`Dupla ${team}`} large />
-        <Text style={styles.freeHint} numberOfLines={1}>
-          {canSit ? 'Toque para sentar' : 'Aguardando jogador'}
-        </Text>
+        <View style={[styles.identity, narrow && styles.identityNarrow]}>
+          <View style={[styles.freeMark, { borderColor: teamColor, width: narrow ? 36 : 40, height: narrow ? 36 : 40 }]}>
+            <Text style={[styles.freePlus, { color: teamColor }]}>+</Text>
+          </View>
+          <View style={[styles.texts, narrow ? styles.textsNarrow : styles.textsWide]}>
+            <Text style={[styles.name, styles.free, narrow && styles.center]} numberOfLines={1}>
+              Livre
+            </Text>
+            <View style={[styles.meta, narrow && styles.metaNarrow]}>
+              <TeamTag team={team} text={`Dupla ${team}`} large />
+            </View>
+          </View>
+        </View>
+        {hint}
       </Pressable>
     );
   }
 
   const isHost = player.userId === hostId;
+  const ready = (
+    <Text style={[styles.ready, narrow && styles.center, { color: player.ready ? colors.success : colors.textFaint }]} numberOfLines={1}>
+      {player.ready ? '✓ Pronto' : '… Aguardando'}
+    </Text>
+  );
   return (
     <View
       style={[styles.seat, isMe && styles.seatMe]}
@@ -114,9 +137,11 @@ function SeatBox({ seat, player, isMe, narrow, hostId, disabled, canSit, onSit }
         player.ready ? 'pronto' : 'aguardando'
       }`}
     >
-      <Text style={[styles.seatHeader, styles.seatHeaderTaken]} numberOfLines={1}>
-        LUGAR {seat}
-      </Text>
+      <View style={[styles.headerRow, narrow && styles.headerRowNarrow]}>
+        <Text style={[styles.seatHeader, styles.seatHeaderTaken]} numberOfLines={1}>
+          LUGAR {seat}
+        </Text>
+      </View>
       <View style={[styles.identity, narrow && styles.identityNarrow]}>
         <PlayerAvatar initials={initials(player.displayName)} team={team} size={narrow ? 36 : 40} active={false} />
         <View style={[styles.texts, narrow ? styles.textsNarrow : styles.textsWide]}>
@@ -124,16 +149,14 @@ function SeatBox({ seat, player, isMe, narrow, hostId, disabled, canSit, onSit }
           <Text style={[styles.name, narrow && styles.center]} numberOfLines={2} ellipsizeMode="tail">
             {player.displayName}
           </Text>
-          <TeamTag team={team} text={`Dupla ${team}`} large />
+          <View style={[styles.meta, narrow && styles.metaNarrow]}>
+            <TeamTag team={team} text={`Dupla ${team}`} large />
+            {isMe ? <Text style={[styles.tag, styles.tagMe]}>VOCÊ</Text> : null}
+            {isHost ? <Text style={[styles.tag, styles.tagHost]}>DONO</Text> : null}
+          </View>
         </View>
       </View>
-      <View style={[styles.tags, narrow && styles.tagsNarrow]}>
-        {isMe ? <Text style={[styles.tag, styles.tagMe]}>VOCÊ</Text> : null}
-        {isHost ? <Text style={[styles.tag, styles.tagHost]}>DONO</Text> : null}
-      </View>
-      <Text style={[styles.ready, narrow && styles.center, { color: player.ready ? colors.success : colors.textFaint }]}>
-        {player.ready ? '✓ Pronto' : '… Aguardando'}
-      </Text>
+      {ready}
     </View>
   );
 }
@@ -142,28 +165,31 @@ const styles = StyleSheet.create({
   teams: { fontSize: font.small - 1, color: colors.textMuted, textAlign: 'center', marginBottom: space.sm },
   grid: { gap: space.sm },
   row: { flexDirection: 'row', gap: space.sm },
+  // Altura mínima igual para todos (os dois da mesma fileira esticam juntos); o conteúdo fica
+  // centralizado, com o mesmo recuo e o mesmo espaço entre blocos em qualquer estado.
   seat: {
     flex: 1,
     minWidth: 0,
-    minHeight: TOUCH_MIN * 2.6,
+    minHeight: SEAT_MIN_H,
     backgroundColor: '#0D0E10E6',
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.lineStrong,
-    paddingHorizontal: space.sm,
-    paddingVertical: space.sm,
+    paddingHorizontal: space.sm + 2,
+    paddingVertical: space.sm + 2,
     justifyContent: 'center',
-    gap: 6,
+    gap: space.sm,
     overflow: 'hidden',
   },
   seatFree: {
     borderStyle: 'dashed',
     borderColor: colors.metalDark,
     backgroundColor: '#00000040',
-    alignItems: 'center',
   },
   seatPressed: { backgroundColor: '#FFFFFF14' },
   seatMe: { borderColor: colors.gold, backgroundColor: '#1C1810F0' },
+  headerRow: { flexDirection: 'row', alignItems: 'center' },
+  headerRowNarrow: { justifyContent: 'center' },
   seatHeader: { fontSize: font.small - 3, fontWeight: '800', letterSpacing: 0.3 },
   seatHeaderTaken: { color: colors.textFaint, letterSpacing: 1 },
   identity: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -174,8 +200,9 @@ const styles = StyleSheet.create({
   textsNarrow: { alignSelf: 'stretch', alignItems: 'center' },
   center: { textAlign: 'center' },
   name: { fontSize: font.body - 1, lineHeight: 21, fontWeight: '800', color: colors.text },
-  tags: { flexDirection: 'row', gap: 4, minHeight: 16 },
-  tagsNarrow: { justifyContent: 'center' },
+  // Dupla e selos na mesma linha, logo abaixo do nome; quebram para a linha de baixo se não couberem.
+  meta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 6, rowGap: 3, marginTop: 2 },
+  metaNarrow: { justifyContent: 'center' },
   tag: {
     fontSize: 10,
     fontWeight: '900',
@@ -187,17 +214,15 @@ const styles = StyleSheet.create({
   },
   tagMe: { color: colors.ink, backgroundColor: colors.gold },
   tagHost: { color: colors.goldSoft, borderWidth: 1, borderColor: colors.goldDeep },
-  ready: { fontSize: font.small - 1, fontWeight: '700' },
+  ready: { fontSize: font.small - 2, fontWeight: '700' },
   freeMark: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    borderRadius: 20,
     borderWidth: 1.5,
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
   },
   freePlus: { fontSize: 20, lineHeight: 22, fontWeight: '700' },
-  free: { fontSize: font.body - 1, fontWeight: '700', color: colors.textMuted },
-  freeHint: { fontSize: font.small - 3, color: colors.textFaint },
+  free: { color: colors.textMuted, fontWeight: '700' },
+  freeHint: { fontSize: font.small - 2, color: colors.textFaint },
 });
