@@ -1,6 +1,6 @@
 // Textos curtos da mesa. Para um jogador, do ponto de vista dele ("Nós" e "Eles");
 // para a mesa central (viewerTeam = null), neutros ("Dupla A" e "Dupla B").
-import type { HandSummary, PublicEvent, PublicGameState, Seat, TableCard, Team, TrickResult } from '../contracts/types';
+import type { HandSummary, PublicGameState, Seat, TableCard, Team, TrickResult } from '../contracts/types';
 
 const TRUCO_NAMES: Record<number, string> = { 3: 'TRUCO', 6: 'SEIS', 9: 'NOVE', 12: 'DOZE' };
 
@@ -60,21 +60,33 @@ export function describeHand(summary: HandSummary, viewerTeam: Team | null): str
   }
 }
 
-/** Fala curta que aparece junto do jogador que agiu ("TRUCO!", "Aceito!"). Carta jogada não tem fala. */
-export function eventBubble(event: PublicEvent | null | undefined, state: PublicGameState): string | null {
-  if (!event) return null;
-  switch (event.action) {
-    case 'request_truco':
-      return state.truco ? `${trucoName(state.truco.value)}!` : 'TRUCO!';
-    case 'respond_truco':
-      if (event.response === 'accept') return 'Aceito!';
-      if (event.response === 'refuse') return 'Corro!';
-      return state.truco ? `${trucoName(state.truco.value)}!` : 'Aumento!';
-    case 'fold':
-      return 'Corro!';
-    default:
-      return null;
-  }
+/**
+ * Primeiro nome, para frases curtas (status, aviso de truco): "Bianca Mendonça pediu TRUCO!" cortava
+ * justamente o pedido. As etiquetas continuam com o nome inteiro (truncado só se não couber).
+ */
+export function shortName(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
+}
+
+/**
+ * Iniciais para o avatar do lugar: primeira letra do primeiro e do último nome ("Maria Eduarda" → "ME"),
+ * ou só a primeira ("Bia" → "B"). Ignora espaços extras; nome vazio vira "?".
+ */
+export function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  const first = [...words[0]][0];
+  const last = words.length > 1 ? [...words[words.length - 1]][0] : '';
+  return (first + last).toLocaleUpperCase('pt-BR');
+}
+
+/**
+ * Lugar destacado como "a vez" na mesa e no painel. Ninguém durante a distribuição, com a partida
+ * encerrada ou com pedido de truco pendente (quem age é a dupla que responde, e o destaque da vez
+ * não deve se confundir com o aviso de truco).
+ */
+export function activeTurnSeat(state: PublicGameState, dealing: boolean): Seat | null {
+  return state.status === 'playing' && !dealing && !state.truco ? state.currentTurnSeat : null;
 }
 
 export type Side = 'bottom' | 'right' | 'top' | 'left';
@@ -122,6 +134,7 @@ export function seatSummaries(
   dealing: boolean,
 ): SeatSummary[] {
   const playing = state.status === 'playing';
+  const turnSeat = activeTurnSeat(state, dealing);
   const tableSeats = state.tableCards.map((c) => c.seat);
   const positions = tablePositions(viewerSeat);
   return (['bottom', 'right', 'top', 'left'] as Side[]).map((side) => {
@@ -130,7 +143,7 @@ export function seatSummaries(
       seat,
       name: nameOf(seat),
       team: seatTeam(seat),
-      isTurn: playing && !dealing && !state.truco && state.currentTurnSeat === seat,
+      isTurn: turnSeat === seat,
       played: tableSeats.includes(seat),
       cardsLeft: cardsLeft(seat, state.trickResults.length, tableSeats, !playing),
     };

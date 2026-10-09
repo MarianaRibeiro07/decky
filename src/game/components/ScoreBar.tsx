@@ -1,6 +1,6 @@
 import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown, LayoutAnimationConfig } from 'react-native-reanimated';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Animated, { FadeInDown, LayoutAnimationConfig, ZoomIn } from 'react-native-reanimated';
 import type { MatchPlayer, PublicGameState, Team } from '../../contracts/types';
 import { colors, font, fonts, radius, space, TOUCH_MIN } from '../../ui/theme';
 import { describeTrick, teamLabel, trucoName } from '../describe';
@@ -17,6 +17,10 @@ interface Props {
 /** Placar das duplas, valor da mão e vazas da mão atual. Só redesenha quando o estado público muda. */
 export const ScoreBar = memo(function ScoreBar({ state, viewerTeam, players, large, onLeave }: Props) {
   // Para o jogador, "Nós" fica sempre à esquerda; na mesa, A à esquerda.
+  // Tela estreita na visão neutra: "DUPLA A" não cabe ao lado do selo do valor e quebrava em duas
+  // linhas; fica só a letra, junto do ponto da cor da dupla (o rótulo de acessibilidade segue completo).
+  const { width } = useWindowDimensions();
+  const label = (team: Team) => (viewerTeam === null && width < 360 ? team : teamLabel(team, viewerTeam));
   const left: Team = viewerTeam ?? 'A';
   const right: Team = left === 'A' ? 'B' : 'A';
   const members = (team: Team) =>
@@ -25,7 +29,9 @@ export const ScoreBar = memo(function ScoreBar({ state, viewerTeam, players, lar
       .map((p) => p.displayName)
       .join(' e ');
 
-  const value = state.truco ? `${state.handValue} → ${trucoName(state.truco.value)}?` : `Vale ${state.handValue}`;
+  // Curto durante o pedido ("SEIS?"): o texto longo ("3 → SEIS?") empurrava o placar por cima do ✕
+  // na mesa dedicada. O valor atual continua no rótulo de acessibilidade e no aviso do centro.
+  const value = state.truco ? `${trucoName(state.truco.value)}?` : `Vale ${state.handValue}`;
 
   return (
     // Ao abrir a tela, o placar aparece parado; só os pontos que mudam depois entram animados.
@@ -46,21 +52,30 @@ export const ScoreBar = memo(function ScoreBar({ state, viewerTeam, players, lar
           accessible
           accessibilityLabel={`Placar: ${teamLabel(left, viewerTeam)} ${state.score[left]}, ${teamLabel(right, viewerTeam)} ${state.score[right]}. Partida até 12.`}
         >
-          <TeamScore team={left} label={teamLabel(left, viewerTeam)} points={state.score[left]} names={large ? members(left) : null} large={large} />
+          <TeamScore team={left} label={label(left)} points={state.score[left]} names={large ? members(left) : null} large={large} />
           <Text style={[styles.x, large && styles.xLarge]}>×</Text>
-          <TeamScore team={right} label={teamLabel(right, viewerTeam)} points={state.score[right]} names={large ? members(right) : null} large={large} />
+          <TeamScore team={right} label={label(right)} points={state.score[right]} names={large ? members(right) : null} large={large} />
         </View>
 
         <View
           style={styles.hand}
           accessible
-          accessibilityLabel={`Mão ${state.handNumber}, vale ${state.handValue}. Vazas: ${
+          accessibilityLabel={`Mão ${state.handNumber}, vale ${state.handValue}${
+            state.truco ? `, pedido de ${trucoName(state.truco.value).toLowerCase()} aguardando resposta` : ''
+          }. Vazas: ${
             state.trickResults.map((r) => describeTrick(r, viewerTeam)).join(', ') || 'nenhuma'
           }`}
         >
-          <Text style={[styles.value, large && styles.valueLarge, state.truco && styles.valueTruco]} numberOfLines={1}>
+          {/* Troca de valor (pedido, aceite, mão nova) entra com um leve salto: o aceite de truco aparece
+              aqui também, como "Vale 6". Ao abrir a tela, aparece parado (skipEntering acima). */}
+          <Animated.Text
+            key={value}
+            entering={ZoomIn.duration(260)}
+            style={[styles.value, large && styles.valueLarge, state.truco && styles.valueTruco]}
+            numberOfLines={1}
+          >
             {value}
-          </Text>
+          </Animated.Text>
           <View style={styles.tricks}>
             {[0, 1, 2].map((i) => (
               <TrickDot key={i} result={state.trickResults[i]} viewerTeam={viewerTeam} large={large} />
@@ -77,7 +92,9 @@ function TeamScore({ team, label, points, names, large }: { team: Team; label: s
     <View style={styles.team}>
       <View style={styles.teamHead}>
         <View style={[styles.teamDot, { backgroundColor: team === 'A' ? colors.teamA : colors.teamB }]} />
-        <Text style={[styles.teamLabel, large && styles.teamLabelLarge]}>{label}</Text>
+        <Text style={[styles.teamLabel, large && styles.teamLabelLarge]} numberOfLines={1}>
+          {label}
+        </Text>
       </View>
       <Animated.Text key={points} entering={FadeInDown.duration(260)} style={[styles.points, large && styles.pointsLarge]}>
         {points}
@@ -131,15 +148,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   leaveText: { color: colors.textMuted, fontSize: font.body, fontWeight: '700' },
-  score: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.md },
-  team: { alignItems: 'center', minWidth: 56 },
+  score: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.md },
+  // Encolhe com o espaço: nomes longos das duplas truncam dentro da coluna em vez de vazar por cima do ✕.
+  team: { alignItems: 'center', minWidth: 56, flexShrink: 1 },
   teamHead: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   teamDot: { width: 8, height: 8, borderRadius: 4 },
   teamLabel: { color: colors.textMuted, fontSize: font.small - 2, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },
   teamLabelLarge: { fontSize: font.small },
   points: { fontFamily: fonts.displayHeavy, fontVariant: ['lining-nums'], color: colors.text, fontSize: 32, lineHeight: 40 },
   pointsLarge: { fontSize: 56, lineHeight: 68 },
-  names: { color: colors.textFaint, fontSize: font.small - 2, maxWidth: 130 },
+  names: { color: colors.textFaint, fontSize: font.small - 2, maxWidth: 130, alignSelf: 'stretch', textAlign: 'center' },
   x: { fontFamily: fonts.display, color: colors.metalDark, fontSize: font.large },
   xLarge: { fontSize: font.title },
   hand: { alignItems: 'flex-end', gap: 5, minWidth: 84 },

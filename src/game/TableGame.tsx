@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MatchPlayer, MatchView, Seat } from '../contracts/types';
 import type { ConnectionStatus } from '../lib/useLiveRefresh';
@@ -12,7 +12,7 @@ import { ConnectionBanner, StatusBanner } from './components/StatusBanner';
 import { TableBoard } from './components/TableBoard';
 import { statusText } from './status';
 import { useDealAnimation } from './useDealAnimation';
-import { useEventBubble } from './useEventBubble';
+import { useTableCue } from './useTableCue';
 
 interface Props {
   match: MatchView;
@@ -27,9 +27,13 @@ interface Props {
 export function TableGame({ match, players, connection }: Props) {
   useScreenAwake();
   const insets = useSafeAreaInsets();
+  // Placar e banner grandes só em aparelho alto: no celular baixo eles roubavam a altura da mesa
+  // e as cartas caíam para o tamanho mínimo.
+  const { height } = useWindowDimensions();
+  const roomy = height >= 720;
   const state = match.state;
   const deal = useDealAnimation(match.matchId, state);
-  const bubble = useEventBubble(match);
+  const cue = useTableCue(match, connection);
   const nameOf = (seat: Seat) => players.find((p) => p.seat === seat)?.displayName ?? `Lugar ${seat}`;
 
   const leaveTable = useCallback(() => {
@@ -51,10 +55,10 @@ export function TableGame({ match, players, connection }: Props) {
         },
       ]}
     >
-      <ScoreBar state={state} viewerTeam={null} players={players} large onLeave={leaveTable} />
+      <ScoreBar state={state} viewerTeam={null} players={players} large={roomy} onLeave={leaveTable} />
       <ConnectionBanner status={connection} />
-      <StatusBanner status={statusText({ state, viewerSeat: null, nameOf, canRespond: false, phase: deal.phase })} large />
-      <TableBoard state={state} players={players} bottomSeat={1} viewerSeat={null} deal={deal} variant="large" bubble={bubble} />
+      <StatusBanner status={statusText({ state, viewerSeat: null, nameOf, canRespond: false, phase: deal.phase })} large={roomy} />
+      <TableBoard state={state} players={players} bottomSeat={1} viewerSeat={null} deal={deal} variant="large" cue={cue} />
       <Text style={styles.footer} numberOfLines={1}>
         Mesa{match.roomCode ? ` · sala ${match.roomCode}` : ''} · mostra só o que é público
       </Text>

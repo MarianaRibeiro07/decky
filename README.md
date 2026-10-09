@@ -68,7 +68,7 @@ Para a demonstração, desligue **Confirm email** em Authentication > Providers 
 
 ### Fixture visual (só desenvolvimento)
 
-Com `npx expo start`, a rota `/dev/preview` mostra a mesa com uma partida **simulada no próprio aparelho** pelo motor de regras (barra "FIXTURE LOCAL · sem servidor"), com botões para ver como cada lugar ou como a mesa. Alterna entre "com mesa" (5 aparelhos) e "sem mesa" (4 aparelhos). Serve para revisar layout e animação sem Supabase e sem 4 celulares. **Não é o multiplayer real** e não deve ser apresentada como tal. Em build de produção a rota só mostra "Indisponível".
+Com `npx expo start`, a rota `/dev/preview` mostra a mesa com uma partida **simulada no próprio aparelho** pelo motor de regras (barra "FIXTURE LOCAL · sem servidor"), com botões para ver como cada lugar ou como a mesa. Alterna entre "com mesa" (5 aparelhos) e "sem mesa" (4 aparelhos), mostra a seleção de lugares ("Sala") e tem atalhos que agem pelo lugar da vez sem trocar de visão ("Truco/+", "Aceitar", "Correr", "Jogar"), para ver os avisos de truco na própria mesa, além de "Nomes longos" para conferir truncamento. Serve para revisar layout e animação sem Supabase e sem 4 celulares. **Não é o multiplayer real** e não deve ser apresentada como tal. Em build de produção a rota só mostra "Indisponível".
 
 ### Variáveis de ambiente
 

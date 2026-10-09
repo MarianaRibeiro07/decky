@@ -1,24 +1,18 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Share, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../../src/auth/AuthProvider';
-import type { HostMode, RoomSeat, Seat } from '../../src/contracts/types';
+import type { HostMode } from '../../src/contracts/types';
 import { startMatch } from '../../src/game/api';
 import { errorMessage } from '../../src/lib/errors';
 import { changeSeat, leaveRoom, setHostMode, setReady } from '../../src/rooms/api';
+import { SeatPicker } from '../../src/rooms/SeatPicker';
 import { useRoom } from '../../src/rooms/useRoom';
 import { Button } from '../../src/ui/Button';
 import { Notice } from '../../src/ui/Notice';
 import { Panel } from '../../src/ui/Panel';
 import { Screen } from '../../src/ui/Screen';
-import { FeltPanel } from '../../src/ui/TableSurface';
-import { colors, font, fonts, radius, space, TOUCH_MIN } from '../../src/ui/theme';
-
-// Grade em volta da mesa: parceiros ficam na diagonal (1 e 3, 2 e 4).
-const GRID: Seat[][] = [
-  [1, 2],
-  [4, 3],
-];
+import { colors, font, fonts, space } from '../../src/ui/theme';
 
 export default function Lobby() {
   const { code } = useLocalSearchParams<{ code: string }>();
@@ -102,28 +96,15 @@ export default function Lobby() {
         />
       ) : null}
 
-      <FeltPanel>
-        <Text style={styles.teams}>Dupla A: lugares 1 e 3 · Dupla B: lugares 2 e 4</Text>
-        <View style={styles.grid}>
-          {GRID.map((row, i) => (
-            <View key={i} style={styles.row}>
-              {row.map((seat) => (
-                <SeatBox
-                  key={seat}
-                  seat={seat}
-                  player={seats.find((s) => s.seat === seat)}
-                  isMe={me?.seat === seat}
-                  hostId={room?.hostUserId}
-                  disabled={!!busy}
-                  // A mesa não senta: para ela, lugar livre só mostra que falta jogador.
-                  canSit={!!me}
-                  onSit={() => room && run(`seat-${seat}`, () => changeSeat(room.id, seat))}
-                />
-              ))}
-            </View>
-          ))}
-        </View>
-      </FeltPanel>
+      <SeatPicker
+        seats={seats}
+        mySeat={me?.seat ?? null}
+        hostId={room?.hostUserId}
+        disabled={!!busy}
+        // A mesa não senta: para ela, lugar livre só mostra que falta jogador.
+        canSit={!!me}
+        onSit={(seat) => room && run(`seat-${seat}`, () => changeSeat(room.id, seat))}
+      />
 
       <Notice kind="error" message={error} />
 
@@ -205,94 +186,14 @@ function ModeBox({ mode, isHost, busy, disabled, onSwitch }: ModeBoxProps) {
   );
 }
 
-interface SeatBoxProps {
-  seat: Seat;
-  player: RoomSeat | undefined;
-  isMe: boolean;
-  hostId: string | undefined;
-  disabled: boolean;
-  canSit: boolean;
-  onSit: () => void;
-}
-
-function SeatBox({ seat, player, isMe, hostId, disabled, canSit, onSit }: SeatBoxProps) {
-  const team = seat % 2 === 1 ? 'A' : 'B';
-  const teamColor = team === 'A' ? colors.teamA : colors.teamB;
-  const header = `Lugar ${seat} · Dupla ${team}`;
-
-  if (!player) {
-    return (
-      <Pressable
-        style={({ pressed }) => [styles.seat, styles.seatFree, pressed && styles.seatPressed]}
-        onPress={onSit}
-        disabled={disabled || !canSit}
-        accessibilityRole="button"
-        accessibilityLabel={`${header}, livre.${canSit ? ' Toque para sentar aqui' : ' Aguardando jogador'}`}
-      >
-        <Text style={[styles.seatHeader, { color: teamColor }]}>{header}</Text>
-        <Text style={styles.free}>Livre</Text>
-        <Text style={styles.freeHint}>{canSit ? 'Toque para sentar' : 'Aguardando jogador'}</Text>
-      </Pressable>
-    );
-  }
-
-  return (
-    <View
-      style={[styles.seat, { borderLeftColor: teamColor }, isMe && styles.seatMe]}
-      accessible
-      accessibilityLabel={`${header}, ${player.displayName}${isMe ? ', você' : ''}, ${player.ready ? 'pronto' : 'aguardando'}`}
-    >
-      <Text style={[styles.seatHeader, { color: teamColor }]}>{header}</Text>
-      <Text style={styles.name} numberOfLines={1}>
-        {player.displayName}
-        {isMe ? ' (você)' : ''}
-      </Text>
-      {player.userId === hostId ? <Text style={styles.host}>Dono da sala</Text> : null}
-      <Text style={[styles.ready, { color: player.ready ? colors.success : colors.textFaint }]}>
-        {player.ready ? '✓ Pronto' : '… Aguardando'}
-      </Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   codeBox: { alignItems: 'stretch' },
   codeLabel: { color: colors.textMuted, fontSize: font.tiny, fontWeight: '700', letterSpacing: 2, textAlign: 'center' },
   code: { color: colors.text, fontSize: font.huge + 4, fontWeight: '800', letterSpacing: 10, textAlign: 'center' },
-  teams: { fontSize: font.small - 1, color: colors.textMuted, textAlign: 'center', marginBottom: space.sm },
   modeTexts: { gap: space.xs },
   modeKicker: { fontSize: font.tiny, fontWeight: '700', letterSpacing: 1.4, color: colors.textFaint },
   modeTitle: { fontFamily: fonts.display, fontSize: font.large - 2, lineHeight: 28, color: colors.text },
   modeTitleTable: { color: colors.goldSoft },
   modeText: { fontSize: font.small, lineHeight: 21, color: colors.textMuted },
-  grid: { gap: space.sm },
-  row: { flexDirection: 'row', gap: space.sm },
-  seat: {
-    flex: 1,
-    minHeight: TOUCH_MIN * 2.3,
-    backgroundColor: '#0D0E10E6',
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.lineStrong,
-    borderLeftWidth: 4,
-    padding: space.sm,
-    justifyContent: 'center',
-    gap: 2,
-  },
-  seatFree: {
-    borderStyle: 'dashed',
-    borderLeftWidth: 1,
-    borderColor: colors.metalDark,
-    backgroundColor: '#00000040',
-    alignItems: 'center',
-  },
-  seatPressed: { backgroundColor: '#FFFFFF14' },
-  seatMe: { borderColor: colors.gold, backgroundColor: '#1E1A12F0' },
-  seatHeader: { fontSize: font.small - 2, fontWeight: '800', letterSpacing: 0.3 },
-  name: { fontSize: font.large - 2, fontWeight: '800', color: colors.text },
-  host: { fontSize: font.small - 2, color: colors.gold },
-  ready: { fontSize: font.body - 2, fontWeight: '700' },
-  free: { fontSize: font.large - 2, fontWeight: '700', color: colors.textMuted },
-  freeHint: { fontSize: font.small - 2, color: colors.textFaint },
   waiting: { fontSize: font.body - 1, color: colors.textMuted, textAlign: 'center' },
 });

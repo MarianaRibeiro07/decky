@@ -5,11 +5,12 @@ import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { applyAction, newMatch, seededRng } from '../../supabase/functions/_shared/engine/index.ts';
+import { applyAction, getLegalActions, newMatch, seededRng } from '../../supabase/functions/_shared/engine/index.ts';
 import type { MatchState } from '../../supabase/functions/_shared/engine/index.ts';
 import type { GameAction, GameResult, MatchPlayer, MatchView, Seat } from '../../src/contracts/types';
 import { PlayerGame } from '../../src/game/PlayerGame';
 import { TableGame } from '../../src/game/TableGame';
+import { SeatPicker } from '../../src/rooms/SeatPicker';
 import { Button } from '../../src/ui/Button';
 import { Screen } from '../../src/ui/Screen';
 import { colors, font, radius, space } from '../../src/ui/theme';
@@ -21,7 +22,17 @@ const PLAYERS: MatchPlayer[] = [
   { seat: 4, team: 'B', userId: 'u4', displayName: 'Duda' },
 ];
 
-type View_ = Seat | 'table';
+// Nomes longos, para conferir truncamento e alinhamento nas etiquetas.
+const LONG_PLAYERS: MatchPlayer[] = [
+  { seat: 1, team: 'A', userId: 'u1', displayName: 'Ana Carolina Albuquerque' },
+  { seat: 2, team: 'B', userId: 'u2', displayName: 'Bianca Mendonça' },
+  { seat: 3, team: 'A', userId: 'u3', displayName: 'Caio Yuri Lacerda' },
+  { seat: 4, team: 'B', userId: 'u4', displayName: 'Maria Eduarda Sant’Anna' },
+];
+
+type Quick = 'truco' | 'accept' | 'refuse' | 'play';
+
+type View_ = Seat | 'table' | 'lobby';
 
 export default function Preview() {
   if (!__DEV__) {
@@ -43,6 +54,8 @@ function Fixture() {
   const [view, setView] = useState<View_>(1);
   // Com mesa dedicada (5 aparelhos) o jogador vê só a mão e o essencial; sem ela, a mesa fica em cima.
   const [withTable, setWithTable] = useState(true);
+  const [longNames, setLongNames] = useState(false);
+  const players = longNames ? LONG_PLAYERS : PLAYERS;
 
   const match: MatchView = {
     matchId,
@@ -57,7 +70,7 @@ function Fixture() {
   async function submit(_: string, action: GameAction, expectedRevision: number): Promise<GameResult> {
     await new Promise((r) => setTimeout(r, 250));
     const current = gameRef.current;
-    if (view === 'table') return { ok: false, error: 'not_member' };
+    if (view === 'table' || view === 'lobby') return { ok: false, error: 'not_member' };
     if (expectedRevision !== current.revision) return { ok: false, error: 'conflict' };
     const result = applyAction(current.state, view, action, rng);
     if (!result.ok) return { ok: false, error: result.error };
@@ -65,6 +78,29 @@ function Fixture() {
     gameRef.current = next;
     setGame(next);
     return { ok: true, newRevision: next.revision };
+  }
+
+  // Atalhos da fixture: aplicam a ação pelo lugar que agiria agora, sem sair da visão atual
+  // (útil para ver os avisos de truco na mesa central, que não tem botões de jogo).
+  function quick(kind: Quick) {
+    const current = gameRef.current;
+    const pub = current.state.public;
+    if (pub.status !== 'playing') return;
+    const responder = pub.truco ? (((pub.truco.requestedBySeat % 4) + 1) as Seat) : pub.currentTurnSeat;
+    const legal = getLegalActions(pub, responder);
+    let action: GameAction | null = null;
+    if (kind === 'truco') {
+      if (pub.truco && legal.raiseTruco) action = { type: 'respond_truco', response: 'raise' };
+      else if (!pub.truco && legal.requestTruco) action = { type: 'request_truco' };
+    } else if (kind === 'accept' && pub.truco) action = { type: 'respond_truco', response: 'accept' };
+    else if (kind === 'refuse') action = pub.truco ? { type: 'respond_truco', response: 'refuse' } : { type: 'fold' };
+    else if (kind === 'play' && legal.playCard) action = { type: 'play_card', card: current.state.hands[responder - 1][0] };
+    if (!action) return;
+    const result = applyAction(current.state, responder, action, rng);
+    if (!result.ok) return;
+    const next = { state: result.state, revision: current.revision + 1 };
+    gameRef.current = next;
+    setGame(next);
   }
 
   return (
@@ -90,7 +126,7 @@ function Fixture() {
           ))}
         </View>
         <View style={styles.tabs}>
-          {((withTable ? [1, 2, 3, 4, 'table'] : [1, 2, 3, 4]) as View_[]).map((v) => (
+          {((withTable ? [1, 2, 3, 4, 'table', 'lobby'] : [1, 2, 3, 4, 'lobby']) as View_[]).map((v) => (
             <Pressable
               key={String(v)}
               onPress={() => setView(v)}
@@ -98,20 +134,62 @@ function Fixture() {
               accessibilityRole="button"
               accessibilityState={{ selected: view === v }}
             >
-              <Text style={[styles.tabText, view === v && styles.tabTextOn]}>{v === 'table' ? 'Mesa' : `Lugar ${v}`}</Text>
+              <Text style={[styles.tabText, view === v && styles.tabTextOn]}>
+                {v === 'table' ? 'Mesa' : v === 'lobby' ? 'Sala' : `Lugar ${v}`}
+              </Text>
             </Pressable>
           ))}
         </View>
+        <View style={styles.tabs}>
+          {(
+            [
+              ['truco', 'Truco/+'],
+              ['accept', 'Aceitar'],
+              ['refuse', 'Correr'],
+              ['play', 'Jogar'],
+            ] as [Quick, string][]
+          ).map(([kind, label]) => (
+            <Pressable
+              key={kind}
+              onPress={() => quick(kind)}
+              style={styles.tab}
+              accessibilityRole="button"
+              accessibilityLabel={`Simular: ${label}`}
+            >
+              <Text style={styles.tabText}>{label}</Text>
+            </Pressable>
+          ))}
+          <Pressable
+            onPress={() => setLongNames((v) => !v)}
+            style={[styles.tab, longNames && styles.tabOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: longNames }}
+          >
+            <Text style={[styles.tabText, longNames && styles.tabTextOn]}>Nomes longos</Text>
+          </Pressable>
+        </View>
       </View>
       <View style={styles.game}>
-        {view === 'table' ? (
-          <TableGame match={match} players={PLAYERS} connection="online" />
+        {view === 'lobby' ? (
+          // Seleção de lugares como na sala: lugar 4 livre para ver o estado "Livre".
+          <Screen>
+            <SeatPicker
+              seats={players.slice(0, 3).map((p, i) => ({ ...p, ready: i !== 1 }))}
+              mySeat={1}
+              hostId="u2"
+              disabled={false}
+              canSit
+              onSit={() => {}}
+            />
+          </Screen>
+        ) : view === 'table' ? (
+          <TableGame match={match} players={players} connection="online" />
         ) : (
           <PlayerGame
             key={`${view}-${withTable}`}
             match={match}
             hand={{ revision: game.revision, seat: view, cards: game.state.hands[view - 1] }}
-            players={PLAYERS}
+            players={players}
             mySeat={view}
             connection="online"
             refresh={async () => {}}

@@ -1,7 +1,7 @@
 import { memo, useId, useState, type ReactNode } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { ClipPath, Defs, G, Image, LinearGradient, Path, Pattern, RadialGradient, Stop } from 'react-native-svg';
-import { insetBox, superellipsePath, surfaceMetrics, type SurfaceVariant } from './shapes';
+import { insetBox, surfaceMetrics, surfacePath, type SurfaceVariant } from './shapes';
 import { colors } from './theme';
 
 /** Textura de feltro 128x128 que repete sem emenda (~20 KB). */
@@ -24,13 +24,15 @@ export const TableSurface = memo(function TableSurface({ width, height, variant 
   // useId tem caracteres que não valem em url(#...); os ids precisam ser únicos por página na web.
   const id = `ts${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const m = surfaceMetrics(width, height, variant);
-  const top = superellipsePath(m.top, m.n);
-  const apron = superellipsePath({ ...m.top, y: m.top.y + m.apron }, m.n);
-  const rail = superellipsePath(insetBox(m.top, m.rim), m.n);
-  const felt = superellipsePath(m.felt, m.n);
-  const stitch = superellipsePath(insetBox(m.top, m.rim * 0.28), m.n);
-  const cushion = superellipsePath(insetBox(m.top, m.rim * 0.55), m.n);
-  const print = superellipsePath(insetBox(m.felt, Math.min(m.felt.w, m.felt.h) * 0.16), m.n);
+  const ring = (inset: number) => surfacePath(m, insetBox(m.top, inset), inset);
+  const top = ring(0);
+  const apron = surfacePath(m, { ...m.top, y: m.top.y + m.apron }, 0);
+  const rail = ring(m.rim);
+  const felt = ring(m.rim + m.rail);
+  const stitch = ring(m.rim * 0.28);
+  const cushion = ring(m.rim * 0.55);
+  const printInset = Math.min(m.felt.w, m.felt.h) * 0.16;
+  const print = surfacePath(m, insetBox(m.felt, printInset), m.rim + m.rail + printInset);
   const innerShadow = variant === 'table' ? 18 : 10;
 
   return (

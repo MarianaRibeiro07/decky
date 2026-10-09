@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import { Image, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
-import Animated, { FadeInDown, FadeInLeft, FadeInRight, FadeInUp, LayoutAnimationConfig, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInLeft, FadeInRight, FadeInUp, FadeOut, LayoutAnimationConfig, ZoomIn } from 'react-native-reanimated';
 import { resolveTrick } from '../../../supabase/functions/_shared/engine/strength.ts';
 import type { MatchPlayer, PublicGameState, Seat, TableCard } from '../../contracts/types';
 import { CARD_BACK, PlayingCard } from '../../ui/PlayingCard';
@@ -8,10 +8,12 @@ import { surfaceMetrics } from '../../ui/shapes';
 import { TableSurface } from '../../ui/TableSurface';
 import { colors, font, radius, shadow } from '../../ui/theme';
 import type { DealAnimation } from '../useDealAnimation';
-import { cardsLeft, playedCardKey, seatTeam, tablePositions, teamLabel, type Side } from '../describe';
+import { activeTurnSeat, cardsLeft, initials, playedCardKey, shortName, seatTeam, tablePositions, teamLabel, type Side } from '../describe';
 import { tableGeometry, type Rect, type TableVariant } from '../geometry';
+import type { ShownCue } from '../useTableCue';
 import { DealLayer } from './DealLayer';
 import { SeatChip } from './SeatChip';
+import { TrucoCallout } from './TrucoCallout';
 import { ManilhaBadge, ViraCard } from './ViraCard';
 
 const SIDES: Side[] = ['bottom', 'right', 'top', 'left'];
@@ -33,8 +35,8 @@ export interface TableBoardProps {
   viewerSeat: Seat | null;
   deal: DealAnimation;
   variant: TableVariant;
-  /** Fala curta de quem acabou de agir ("TRUCO!", "Aceito!"). */
-  bubble: { seat: Seat; text: string } | null;
+  /** Aviso da última ação confirmada: pedido/aceite de truco no centro, "Corro!" junto de quem falou. */
+  cue: ShownCue | null;
 }
 
 /**
@@ -43,7 +45,7 @@ export interface TableBoardProps {
  * Não recebe nem desenha mãos: só o que está em PublicGameState.
  *
  * `memo`: selecionar carta, enviar jogada ou mostrar erro mudam só a mão; a mesa redesenha apenas
- * quando o estado público, a fase da distribuição ou a fala mudam.
+ * quando o estado público, a fase da distribuição ou o aviso mudam.
  */
 export const TableBoard = memo(function TableBoard(props: TableBoardProps) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -55,7 +57,8 @@ export const TableBoard = memo(function TableBoard(props: TableBoardProps) {
 
   // O tampo (couro, trilho, feltro) é desenhado uma vez por tamanho; lugares e cartas ficam na área do feltro.
   const surface = props.variant === 'large' ? 'table' : 'compact';
-  const content = size ? surfaceMetrics(size.w, size.h, surface).content : null;
+  const metrics = size ? surfaceMetrics(size.w, size.h, surface) : null;
+  const content = metrics?.content ?? null;
 
   return (
     <View style={styles.area} onLayout={onLayout}>
@@ -66,7 +69,7 @@ export const TableBoard = memo(function TableBoard(props: TableBoardProps) {
             {/* Ao abrir a tela ou reconectar, as cartas que já estavam na mesa aparecem paradas;
                 só as jogadas que chegam depois entram voando. */}
             <LayoutAnimationConfig skipEntering>
-              <Board {...props} width={content.w} height={content.h} />
+              <Board {...props} width={content.w} height={content.h} shape={metrics!.n} />
             </LayoutAnimationConfig>
           </View>
         </>
@@ -75,14 +78,28 @@ export const TableBoard = memo(function TableBoard(props: TableBoardProps) {
   );
 });
 
-function Board({ state, players, bottomSeat, viewerSeat, deal, variant, bubble, width, height }: TableBoardProps & { width: number; height: number }) {
-  const g = tableGeometry(width, height, variant);
+function Board({
+  state,
+  players,
+  bottomSeat,
+  viewerSeat,
+  deal,
+  variant,
+  cue,
+  width,
+  height,
+  shape,
+}: TableBoardProps & { width: number; height: number; shape: number }) {
+  const g = tableGeometry(width, height, variant, shape);
   const large = variant === 'large';
   const positions = tablePositions(bottomSeat);
   const sideOf = (seat: Seat) => SIDES.find((s) => positions[s] === seat)!;
   const viewerTeam = viewerSeat ? seatTeam(viewerSeat) : null;
   const playing = state.status === 'playing';
   const dealing = deal.phase === 'intro' || deal.phase === 'dealing';
+  // Mesma regra para a etiqueta e o espaço da carta (antes, com truco pendente, a etiqueta seguia
+  // destacada e o espaço da carta não).
+  const turnSeat = activeTurnSeat(state, dealing);
 
   // Entre vazas a mesa limpa; a última vaza fica esmaecida para todos verem o que caiu.
   // Na mão nova, ela só aparece durante a pausa antes de distribuir.
@@ -92,8 +109,8 @@ function Board({ state, players, bottomSeat, viewerSeat, deal, variant, bubble, 
   const winnerSeat = showingLast && state.lastTrick!.result !== 'tie' ? resolveTrick(state.lastTrick!.cards, state.manilhaRank).leadSeat : null;
   const tableSeats = state.tableCards.map((c) => c.seat);
 
-  const nameOf = (seat: Seat) =>
-    seat === viewerSeat ? 'Você' : players.find((p) => p.seat === seat)?.displayName ?? `Lugar ${seat}`;
+  const displayName = (seat: Seat) => players.find((p) => p.seat === seat)?.displayName ?? `Lugar ${seat}`;
+  const nameOf = (seat: Seat) => (seat === viewerSeat ? 'Você' : displayName(seat));
 
   return (
     <>
@@ -106,7 +123,7 @@ function Board({ state, players, bottomSeat, viewerSeat, deal, variant, bubble, 
       {SIDES.map((side) => {
         const seat = positions[side];
         const played = cards.find((c) => c.seat === seat);
-        const isTurn = playing && !dealing && !state.truco && state.currentTurnSeat === seat;
+        const isTurn = turnSeat === seat;
         return (
           <PlayedSlot
             key={`slot-${side}`}
@@ -127,10 +144,12 @@ function Board({ state, players, bottomSeat, viewerSeat, deal, variant, bubble, 
           <SeatChip
             key={`chip-${side}`}
             rect={g.chips[side]}
+            layout={g.chipLayout[side]}
             name={nameOf(seat)}
+            initials={initials(displayName(seat))}
             team={seatTeam(seat)}
             teamText={teamLabel(seatTeam(seat), viewerTeam)}
-            isTurn={playing && !dealing && state.currentTurnSeat === seat}
+            isTurn={turnSeat === seat}
             // A própria mão aparece embaixo; durante a distribuição os versos chegam voando.
             cardsLeft={seat === viewerSeat || dealing ? null : left}
             large={large}
@@ -138,7 +157,26 @@ function Board({ state, players, bottomSeat, viewerSeat, deal, variant, bubble, 
         );
       })}
 
-      {bubble ? <Bubble key={`${bubble.seat}-${bubble.text}`} rect={g.chips[sideOf(bubble.seat)]} side={sideOf(bubble.seat)} text={bubble.text} large={large} /> : null}
+      {cue && cue.kind === 'speech' ? (
+        <Bubble key={cue.revision} rect={g.chips[sideOf(cue.seat)]} side={sideOf(cue.seat)} text={cue.text} large={large} />
+      ) : null}
+
+      {/* Pedido e aceite de truco no palco do centro: cobre baralho e vira por alguns segundos,
+          nunca as cartas jogadas nem as etiquetas. Fora da distribuição, que já ocupa o centro.
+          O palco fica sempre montado, para o aviso que sai ainda fazer o fade de saída. */}
+      <View pointerEvents="none" style={[styles.abs, { left: g.stage.x, top: g.stage.y, width: g.stage.w, height: g.stage.h }]}>
+        {cue && cue.kind !== 'speech' && !dealing ? (
+          <TrucoCallout
+            key={cue.revision}
+            cue={cue}
+            name={shortName(nameOf(cue.seat))}
+            width={g.stage.w}
+            height={g.stage.h}
+            from={sideOf(cue.seat)}
+            large={large}
+          />
+        ) : null}
+      </View>
 
       {deal.phase === 'dealing' && deal.run ? (
         <DealLayer
@@ -206,13 +244,16 @@ function PlayedSlot({ rect, side, played, dimmed, winner, waiting }: SlotProps) 
 }
 
 function Bubble({ rect, side, text, large }: { rect: Rect; side: Side; text: string; large: boolean }) {
-  const h = large ? 40 : 30;
-  // Em cima da etiqueta, menos no lugar de cima (embaixo dela, para não sair da mesa).
-  const top = side === 'top' ? rect.y + rect.h + 2 : rect.y - h - 2;
+  const h = large ? 38 : 30;
+  // Do lado de dentro da etiqueta (rumo ao centro), sobre o espaço da carta de quem falou: assim a fala
+  // fica sempre dentro do feltro. "Corro!" encerra a mão, então não esconde jogada em andamento.
+  const top = side === 'bottom' ? rect.y - h - 4 : rect.y + rect.h + 4;
+  const w = Math.max(rect.w * 0.8, Math.min(rect.w, 110));
   return (
     <Animated.View
       entering={ZoomIn.springify().damping(14)}
-      style={[styles.bubble, { left: rect.x, width: rect.w, top, height: h }]}
+      exiting={FadeOut.duration(180)}
+      style={[styles.bubble, { left: rect.x + (rect.w - w) / 2, width: w, top, height: h }]}
       accessibilityLiveRegion="polite"
     >
       <Text style={[styles.bubbleText, large && styles.bubbleTextLarge]} numberOfLines={1}>
