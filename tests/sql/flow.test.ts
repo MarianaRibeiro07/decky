@@ -58,6 +58,12 @@ async function submit(user: string, matchId: string, action: GameAction, opts: {
   return body;
 }
 
+/** O parceiro confirma o pedido da dupla que está em aberto. */
+async function confirmProposal(user: string, matchId: string) {
+  const id = (await readMatch(user, matchId)).public_state.proposal?.id ?? 0;
+  return submit(user, matchId, { type: 'confirm_proposal', proposalId: id });
+}
+
 async function setupRoom(hostMode: 'player' | 'table') {
   const host = hostMode === 'table' ? mesa : ana;
   const [room] = await t.asUser<{ id: string; code: string }>(host, 'select * from public.create_room($1)', [hostMode]);
@@ -134,7 +140,11 @@ describe('host mesa: 5 aparelhos', () => {
     const player = [ana, bia, caio, duda][seat - 1];
     const card = (await myHand(player, matchId))!.cards[1];
 
-    expect(await submit(player, matchId, { type: 'play_card', card })).toEqual({ ok: true, newRevision: 1 });
+    const result = await submit(player, matchId, { type: 'play_card', card });
+    expect(result).toMatchObject({ ok: true, newRevision: 1 });
+    // Quem jogou já recebe o estado gravado e a própria mão, iguais ao que as leituras devolvem.
+    expect(result.state).toEqual((await readMatch(player, matchId)).public_state);
+    expect(result.hand).toEqual(await myHand(player, matchId));
 
     expect((await myHand(player, matchId))!.cards).not.toContainEqual(card);
     for (const viewer of [mesa, ana, bia, caio, duda]) {
@@ -186,7 +196,8 @@ describe('host mesa: 5 aparelhos', () => {
     const first = await submit(player, matchId, { type: 'play_card', card }, { clientActionId: 'toque-1', expectedRevision: 0 });
     // Rede caiu depois de enviar: o app reenvia a MESMA ação (mesmo clientActionId e revisão).
     const retry = await submit(player, matchId, { type: 'play_card', card }, { clientActionId: 'toque-1', expectedRevision: 0 });
-    expect(first).toEqual({ ok: true, newRevision: 1 });
+    expect(first).toMatchObject({ ok: true, newRevision: 1 });
+    // O reenvio não aplica de novo: só confirma a revisão (o app relê o estado).
     expect(retry).toEqual({ ok: true, newRevision: 1 });
     expect((await readMatch(ana, matchId)).revision).toBe(1);
     expect((await myHand(player, matchId))!.cards).toHaveLength(2);
@@ -221,14 +232,18 @@ describe('host mesa: 5 aparelhos', () => {
     const card = (await myHand(asker, matchId))!.cards[0];
     expect(await submit(asker, matchId, { type: 'play_card', card })).toEqual({ ok: false, error: 'illegal_action' });
 
-    // Adversário aumenta para seis: aceita o truco (vale 3) e devolve o pedido.
+    // Adversário aumenta para seis (com o parceiro): aceita o truco (vale 3) e devolve o pedido.
+    const opponentPartner = players[(seat + 2) % 4];
     expect(await submit(opponent, matchId, { type: 'respond_truco', response: 'raise' })).toMatchObject({ ok: true });
+    expect(await confirmProposal(opponentPartner, matchId)).toMatchObject({ ok: true });
     let s = (await readMatch(mesa, matchId)).public_state;
     expect(s.handValue).toBe(3);
     expect(s.truco).toMatchObject({ value: 6, requestedBy: teamOf(((seat % 4) + 1) as Seat) });
 
-    // A dupla de quem pediu truco aceita o seis: a mão passa a valer 6 para todos.
+    // A dupla de quem pediu truco aceita o seis (os dois): a mão passa a valer 6 para todos.
     expect(await submit(partner, matchId, { type: 'respond_truco', response: 'accept' })).toMatchObject({ ok: true });
+    expect((await readMatch(mesa, matchId)).public_state.handValue).toBe(3);
+    expect(await confirmProposal(asker, matchId)).toMatchObject({ ok: true });
     for (const viewer of [mesa, ...players]) {
       s = (await readMatch(viewer, matchId)).public_state;
       expect(s.handValue).toBe(6);
@@ -246,6 +261,7 @@ describe('host mesa: 5 aparelhos', () => {
 
     await submit(asker, matchId, { type: 'request_truco' });
     expect(await submit(opponent, matchId, { type: 'respond_truco', response: 'refuse' })).toMatchObject({ ok: true });
+    expect(await confirmProposal(players[(seat + 2) % 4], matchId)).toMatchObject({ ok: true });
 
     const view = await readMatch(mesa, matchId);
     expect(view.public_state.score[teamOf(seat)]).toBe(1);
@@ -261,6 +277,60 @@ describe('host mesa: 5 aparelhos', () => {
       expect(hand!.cards).toHaveLength(3);
       expect(hand!.revision).toBe(view.revision);
       expect(hand!.seat).toBe(oldHands[i]!.seat);
+    }
+  });
+
+  it('decisão em dupla: correr só vale com os dois, pelo servidor e igual para todos', async () => {
+    const players = [ana, bia, caio, duda];
+    const seat = (await readMatch(mesa, matchId)).public_state.currentTurnSeat;
+    const me = players[seat - 1];
+    const partnerSeat = (((seat + 1) % 4) + 1) as Seat;
+    const partner = players[partnerSeat - 1];
+    const opponent = players[seat % 4];
+
+    // Primeiro integrante pede para correr: todos veem o pedido; a mão não termina.
+    expect(await submit(me, matchId, { type: 'fold' })).toMatchObject({ ok: true });
+    for (const viewer of [mesa, ...players]) {
+      const s = (await readMatch(viewer, matchId)).public_state;
+      expect(s.proposal).toMatchObject({ decision: 'fold', proposedBy: seat, team: teamOf(seat) });
+      expect(s.handNumber).toBe(1);
+      expect(s.score).toEqual({ A: 0, B: 0 });
+    }
+    const id = (await readMatch(mesa, matchId)).public_state.proposal!.id;
+
+    // Ninguém confirma pela dupla: nem quem pediu, nem a outra dupla, nem a mesa.
+    expect(await submit(me, matchId, { type: 'confirm_proposal', proposalId: id })).toEqual({ ok: false, error: 'illegal_action' });
+    expect(await submit(opponent, matchId, { type: 'confirm_proposal', proposalId: id })).toEqual({ ok: false, error: 'illegal_action' });
+    expect(await submit(mesa, matchId, { type: 'confirm_proposal', proposalId: id })).toEqual({ ok: false, error: 'not_member' });
+
+    // O parceiro recusa: o pedido acaba sem efeito.
+    expect(await submit(partner, matchId, { type: 'reject_proposal', proposalId: id })).toMatchObject({ ok: true });
+    let s = (await readMatch(mesa, matchId)).public_state;
+    expect(s.proposal).toBeNull();
+    expect(s.lastEvent?.proposal).toMatchObject({ status: 'rejected', by: partnerSeat });
+
+    // Novo pedido: a confirmação velha (número antigo) não vale.
+    await submit(me, matchId, { type: 'fold' });
+    const newId = (await readMatch(mesa, matchId)).public_state.proposal!.id;
+    expect(newId).toBe(id + 1);
+    expect(await submit(partner, matchId, { type: 'confirm_proposal', proposalId: id })).toEqual({ ok: false, error: 'illegal_action' });
+
+    // Confirmação com toque duplo / rede instável: mesmo clientActionId não aplica duas vezes.
+    const revision = (await readMatch(partner, matchId)).revision;
+    const confirm = { type: 'confirm_proposal', proposalId: newId } as const;
+    const first = await submit(partner, matchId, confirm, { clientActionId: 'confirma-1', expectedRevision: revision });
+    const retry = await submit(partner, matchId, confirm, { clientActionId: 'confirma-1', expectedRevision: revision });
+    expect(first).toMatchObject({ ok: true, newRevision: revision + 1 });
+    expect(retry).toEqual({ ok: true, newRevision: revision + 1 });
+    // Outro toque com a revisão antiga: conflito, não uma segunda confirmação.
+    expect(await submit(partner, matchId, confirm, { expectedRevision: revision })).toEqual({ ok: false, error: 'conflict' });
+
+    for (const viewer of [mesa, ...players]) {
+      s = (await readMatch(viewer, matchId)).public_state;
+      expect(s.proposal).toBeNull();
+      expect(s.handNumber).toBe(2);
+      expect(s.lastHand).toEqual({ winner: teamOf(seat) === 'A' ? 'B' : 'A', points: 1, reason: 'fold' });
+      expect(s.lastEvent).toMatchObject({ seat, action: 'fold', proposal: { status: 'confirmed', by: partnerSeat } });
     }
   });
 
@@ -302,6 +372,16 @@ describe('host mesa: 5 aparelhos', () => {
       if (view.status === 'finished') break;
       if (++steps > 600) throw new Error('partida não terminou');
       const s = view.public_state;
+
+      // Decisão da dupla em aberto: o parceiro confirma (ou, às vezes, recusa).
+      if (s.proposal) {
+        const p = s.proposal;
+        const partnerSeat = (((p.proposedBy + 1) % 4) + 1) as Seat;
+        const answer: GameAction =
+          choose() < 0.8 ? { type: 'confirm_proposal', proposalId: p.id } : { type: 'reject_proposal', proposalId: p.id };
+        expect(await submit(players[partnerSeat - 1], matchId, answer)).toMatchObject({ ok: true });
+        continue;
+      }
 
       if (s.truco) {
         const responder = ([1, 2, 3, 4] as Seat[]).find((x) => teamOf(x) !== s.truco!.requestedBy)!;

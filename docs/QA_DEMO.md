@@ -54,6 +54,20 @@ Cada história tem seus critérios em [PRODUCT_BACKLOG.md](PRODUCT_BACKLOG.md). 
 - [ ] Recusa pontua com o valor anterior ao pedido.
 - [ ] O cliente não consegue enviar placar (tentativa direta é negada).
 
+### Decisão em dupla (correr, 6, 9, 12)
+
+Precisa de 4 aparelhos (ou 2 jogadores da mesma dupla em aparelhos diferentes). Na fixture local (`/dev/preview`) dá para ver as telas trocando de lugar e usar o atalho "Dupla ✓".
+
+- [ ] Só um integrante toca em Correr: a mão não termina; o parceiro vê "Fulano quer correr" com Não e Confirmar; quem pediu vê "Aguardando … confirmar" e 1 de 2.
+- [ ] Os dois confirmam correr: a outra dupla pontua e a mesa mostra "Corro!".
+- [ ] O parceiro recusa: nada muda, a mesa mostra "Não!" e quem pediu vê o aviso.
+- [ ] Pedido de SEIS, NOVE e DOZE (pedir e aumentar): só vira pedido para a outra dupla depois da confirmação.
+- [ ] Aceite de SEIS, NOVE e DOZE: o placar ("Vale …") só muda depois da confirmação.
+- [ ] Enquanto a dupla decide, ninguém joga carta (nem a outra dupla).
+- [ ] Toque duplo em Confirmar não aplica duas vezes.
+- [ ] Fechar e abrir o app no meio do pedido: o pedido continua igual, nada é confirmado sozinho.
+- [ ] Os 4 aparelhos e a mesa mostram o mesmo resultado.
+
 ### Fluxo da partida
 
 - [ ] Virada de vaza: depois da 4ª carta, a vaza resolve e abre a próxima.

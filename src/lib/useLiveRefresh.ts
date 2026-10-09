@@ -5,6 +5,14 @@ import { supabase } from './supabase';
 
 export type ConnectionStatus = 'connecting' | 'online' | 'reconnecting';
 
+/**
+ * Por que a leitura acontece. `changed`: o Realtime avisou que algo mudou (vale a pena buscar tudo de
+ * uma vez); false no polling, na volta do segundo plano e na primeira leitura.
+ */
+export interface RefreshHint {
+  changed: boolean;
+}
+
 interface Watch {
   table: string;
   /** Filtro do Realtime, ex.: `room_id=eq.<id>`. */
@@ -21,7 +29,7 @@ interface Watch {
 export function useLiveRefresh(
   key: string | null,
   watches: Watch[],
-  refresh: () => Promise<void>,
+  refresh: (hint: RefreshHint) => Promise<void>,
   pollMs = 4000,
 ): { status: ConnectionStatus; refreshNow: () => Promise<void> } {
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
@@ -29,6 +37,7 @@ export function useLiveRefresh(
   refreshRef.current = refresh;
   const running = useRef<Promise<void> | null>(null);
   const again = useRef(false);
+  const changeSignal = useRef(false);
 
   // Uma leitura por vez. Pedido durante uma leitura agenda mais uma no fim, para não perder
   // a mudança que motivou o pedido (ex.: logo depois de uma jogada).
@@ -40,8 +49,10 @@ export function useLiveRefresh(
     const run = async () => {
       do {
         again.current = false;
+        const changed = changeSignal.current;
+        changeSignal.current = false;
         try {
-          await refreshRef.current();
+          await refreshRef.current({ changed });
           // Leitura bem-sucedida: os dados estão em dia, mesmo que o Realtime esteja caído (o polling cobre).
           setStatus('online');
         } catch {
@@ -65,7 +76,10 @@ export function useLiveRefresh(
       channel = channel.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: watch.table, filter: watch.filter },
-        () => refreshNow(),
+        () => {
+          changeSignal.current = true;
+          refreshNow();
+        },
       );
     }
     channel.subscribe((state) => {

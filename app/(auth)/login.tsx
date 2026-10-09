@@ -63,6 +63,7 @@ export default function Login() {
         error={errors.password}
         secureTextEntry
         autoComplete="current-password"
+        placeholder="Digite sua senha"
         returnKeyType="go"
         onSubmitEditing={submit}
       />

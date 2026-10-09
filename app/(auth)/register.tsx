@@ -77,6 +77,7 @@ export default function Register() {
         error={errors.password}
         secureTextEntry
         autoComplete="new-password"
+        placeholder="Crie uma senha"
       />
       <TextField
         label="Repita a senha"
@@ -85,6 +86,7 @@ export default function Register() {
         error={errors.confirmation}
         secureTextEntry
         autoComplete="new-password"
+        placeholder="Digite a senha de novo"
         returnKeyType="done"
         onSubmitEditing={submit}
       />

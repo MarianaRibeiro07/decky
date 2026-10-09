@@ -1,9 +1,10 @@
 // O que a linha de status da mesa diz agora. Puro, para ser testado sem React Native.
 import type { PublicGameState, Seat } from '../contracts/types';
 import type { DealPhase } from './deal';
-import { describeHand, describeTrick, seatTeam, shortName, teamLabel, trucoName } from './describe';
+import { describeHand, describeTrick, proposalStake, proposalVerb, seatTeam, shortName, teamLabel, trucoName } from './describe';
 
-export type StatusTone = 'turn' | 'truco' | 'info';
+/** 'team': a dupla de quem olha está decidindo junta (correr, 6, 9, 12). */
+export type StatusTone = 'turn' | 'truco' | 'team' | 'info';
 
 export interface StatusText {
   /** Linha principal, curta (cabe em uma linha). */
@@ -48,6 +49,24 @@ export function statusText({ state, viewerSeat, nameOf, canRespond, phase }: Inp
   }
   if (phase === 'reveal') {
     return { main: 'Revelando a vira…', tone: 'info', recap, extra };
+  }
+
+  // Decisão da dupla pendente: a própria dupla vê o que está em jogo e o que falta;
+  // a outra dupla e a mesa só sabem que alguém está decidindo (a partida está parada).
+  const proposal = state.proposal ?? null;
+  if (proposal) {
+    const verb = proposalVerb(proposal, state.truco);
+    if (viewerTeam !== proposal.team) {
+      const main = viewerTeam === null ? `Dupla ${proposal.team} decidindo…` : 'A outra dupla está decidindo…';
+      return { main, tone: 'info', detail: 'A partida segue quando a dupla responder', recap, extra };
+    }
+    const stake = proposalStake(proposal);
+    if (proposal.proposedBy === viewerSeat) {
+      const partner = (((proposal.proposedBy + 1) % 4) + 1) as Seat;
+      return { main: `Aguardando ${shortName(nameOf(partner))} confirmar`, tone: 'team', detail: `Você pediu para ${verb} · ${stake}`, recap: null, extra };
+    }
+    const who = shortName(nameOf(proposal.proposedBy));
+    return { main: `${who} quer ${verb}`, tone: 'team', detail: `Confirme ou recuse abaixo · ${stake}`, recap: null, extra };
   }
 
   if (state.truco) {

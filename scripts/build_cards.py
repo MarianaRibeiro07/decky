@@ -5,6 +5,9 @@ Uso, na raiz do projeto (precisa de Python 3 e Pillow):
     python scripts/build_cards.py
 
 Faces (`assets/cards/<valor>_<naipe>.png`, 500 x 726):
+- margem interna: a arte original encosta índice e naipes no filete da borda. O desenho é reduzido
+  por igual (`ART_SCALE`, sem deformar) e centralizado num cartão do mesmo tamanho, com o filete
+  redesenhado na borda. Sobra a mesma proporção de papel nos quatro lados (5% da largura e da altura);
 - papel marfim em vez de branco puro: multiplica cada pixel pelo tom `PAPER`. O preto continua
   preto e o vermelho continua vermelho; só o branco perde o brilho de tela, que ofuscava sobre a
   mesa escura;
@@ -12,7 +15,9 @@ Faces (`assets/cards/<valor>_<naipe>.png`, 500 x 726):
   A face com figura passava de 200 KB e até 25 cartas são decodificadas na distribuição. O
   pontilhado evita faixas nos degradês (Ás de Espadas).
 
-É idempotente: uma face que já está marfim é pulada, então rodar duas vezes não escurece o papel.
+É idempotente: uma face que já está marfim é pulada, então rodar duas vezes não escurece o papel nem
+encolhe a arte de novo. Para refazer a partir das artes originais (brancas, sem margem), restaure-as
+do Git antes: `git checkout f3afff4 -- assets/cards` (commit que trouxe o baralho) e rode o script.
 
 Verso (`assets/cards/back.png`): gerado de `assets/Fundo-Carta-Vermelho.png` na mesma proporção das
 faces (500 x 726, o original é 2:3) e com os mesmos cantos arredondados transparentes. Antes era
@@ -34,6 +39,11 @@ CORNER = 22
 PAPER = (252, 248, 239)
 # Ponto do papel usado para saber se a face já foi tratada (dentro da borda, acima de qualquer naipe).
 PAPER_PROBE = (250, 10)
+# Escala da arte dentro do cartão: 0,9 deixa 5% de papel em cada lado (25 px na largura, 36 na altura),
+# o bastante para índice e naipes não encostarem no filete sem deixar a carta vazia.
+ART_SCALE = 0.90
+# Filete da borda das faces originais: 1 px preto e 1 px cinza, com o canto arredondado.
+OUTLINE = ((0, 0, 0), (127, 127, 127))
 
 
 TRANSPARENT = 255
@@ -53,10 +63,37 @@ def quantized(image: Image.Image) -> Image.Image:
     return palette
 
 
+def pad_face(image: Image.Image) -> Image.Image:
+    """
+    Reduz a arte e a centraliza no mesmo tamanho, deixando papel em volta. O filete original
+    (que encolheria junto e viraria uma moldura dentro da carta) é apagado antes e desenhado de
+    novo na borda do cartão, com o mesmo canto.
+    """
+    white = (255, 255, 255)
+    flat = Image.new("RGB", image.size, white)
+    flat.paste(image, mask=image.getchannel("A"))
+    # Apaga o filete: tudo fora de um retângulo arredondado 4 px para dentro vira papel. O canto da
+    # arte original tem raio de ~17 px; o recorte interno usa 14 px para cobrir a curva inteira.
+    inner = Image.new("L", flat.size, 0)
+    ImageDraw.Draw(inner).rounded_rectangle((4, 4, flat.width - 5, flat.height - 5), 14, fill=255)
+    flat.paste(white, mask=ImageChops.invert(inner))
+
+    art = flat.resize((round(flat.width * ART_SCALE), round(flat.height * ART_SCALE)), Image.Resampling.LANCZOS)
+    card = Image.new("RGB", image.size, white)
+    card.paste(art, ((card.width - art.width) // 2, (card.height - art.height) // 2))
+    draw = ImageDraw.Draw(card)
+    for inset, color in enumerate(OUTLINE):
+        draw.rounded_rectangle((inset, inset, card.width - 1 - inset, card.height - 1 - inset), CORNER - inset, outline=color, width=1)
+    padded = card.convert("RGBA")
+    padded.putalpha(rounded_mask(image.size, CORNER))
+    return padded
+
+
 def tint_face(path: Path) -> bool:
     image = Image.open(path).convert("RGBA")
     if image.getpixel(PAPER_PROBE)[:3] != (255, 255, 255):
         return False
+    image = pad_face(image)
     rgb = image.convert("RGB")
     paper = Image.new("RGB", image.size, PAPER)
     tinted = ImageChops.multiply(rgb, paper)

@@ -26,6 +26,33 @@ export interface TrucoRequest {
   requestedBySeat: Seat;
 }
 
+/**
+ * Decisões que a dupla toma junta: correr (com ou sem truco pendente) e as apostas de 6, 9 e 12
+ * (pedir, aumentar e aceitar). Truco de 3 e o aceite do 3 continuam individuais.
+ */
+export type TeamDecision = 'fold' | 'refuse' | 'accept' | 'raise' | 'request_truco';
+
+/**
+ * Pedido de confirmação da dupla. Quem propõe já conta como uma confirmação; a decisão só é
+ * aplicada quando o parceiro confirma. Enquanto existe, a partida fica parada (ninguém joga nem pede).
+ */
+export interface TeamProposal {
+  /** Número único na partida: confirmação de um pedido antigo nunca vale para um novo. */
+  id: number;
+  team: Team;
+  decision: TeamDecision;
+  proposedBy: Seat;
+  /**
+   * O que está em jogo, para os dois verem a mesma coisa: em correr e recusar, os pontos que a outra
+   * dupla ganha; em aceitar, o valor que a mão passa a valer; em pedir e aumentar, o valor pedido.
+   */
+  value: number;
+  handNumber: number;
+}
+
+/** Como terminou (ou em que pé está) um pedido de confirmação, para o evento público. */
+export type ProposalStatus = 'opened' | 'confirmed' | 'rejected' | 'cancelled' | 'invalidated';
+
 export type HandEndReason = 'tricks' | 'refused' | 'fold' | 'all_tied';
 
 export interface HandSummary {
@@ -57,6 +84,10 @@ export interface PublicGameState {
   lastHand: HandSummary | null;
   /** Última ação aceita pelo servidor. Opcional: partidas gravadas antes desta versão não têm. */
   lastEvent?: PublicEvent | null;
+  /** Decisão da dupla aguardando o parceiro. Opcional: partidas gravadas antes desta versão não têm. */
+  proposal?: TeamProposal | null;
+  /** Último número de pedido usado na partida (os números nunca se repetem). */
+  proposalSeq?: number;
   winnerTeam: Team | null;
 }
 
@@ -72,7 +103,11 @@ export type GameAction =
   | { type: 'play_card'; card: Card }
   | { type: 'request_truco' }
   | { type: 'respond_truco'; response: TrucoResponse }
-  | { type: 'fold' };
+  | { type: 'fold' }
+  /** O parceiro confirma o pedido `proposalId`: a decisão é aplicada agora. */
+  | { type: 'confirm_proposal'; proposalId: number }
+  /** O parceiro recusa ou quem pediu desiste do pedido `proposalId`: nada é aplicado. */
+  | { type: 'reject_proposal'; proposalId: number };
 
 export type GameActionType = GameAction['type'];
 
@@ -84,6 +119,12 @@ export interface PublicEvent {
   action: GameActionType;
   card?: Card;
   response?: TrucoResponse;
+  /**
+   * Presente quando o evento vem de uma decisão da dupla. 'opened': o pedido foi registrado e a ação
+   * ainda NÃO aconteceu. 'confirmed': a ação aconteceu (o evento descreve a ação, com `seat` de quem
+   * propôs). 'rejected', 'cancelled', 'invalidated': o pedido acabou sem efeito.
+   */
+  proposal?: { id: number; status: ProposalStatus; decision: TeamDecision; by: Seat };
 }
 
 export type ApplyResult =

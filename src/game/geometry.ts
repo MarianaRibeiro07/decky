@@ -6,6 +6,14 @@ import type { Side } from './describe';
 
 export const CARD_RATIO = 726 / 500;
 
+/**
+ * Cartas jogadas ficam um pouco menores que a carta-base da mesa (a que dimensiona baralho e vira):
+ * acompanhar a vaza não pede carta grande, e o espaço que sobra vai para o palco do centro.
+ * Nunca abaixo de `PLAYED_MIN_W`, para o valor continuar legível no celular pequeno.
+ */
+export const PLAYED_SCALE = 0.88;
+export const PLAYED_MIN_W = 38;
+
 export interface Rect {
   x: number;
   y: number;
@@ -19,6 +27,7 @@ export type TableVariant = 'compact' | 'large';
 export type ChipLayout = 'row' | 'column';
 
 export interface TableGeometry {
+  /** Carta-base: dimensiona baralho e vira (cartas jogadas usam `played`, um pouco menores). */
   card: { w: number; h: number };
   /** Etiqueta de cada lugar (avatar, nome, dupla, cartas na mão). */
   chips: Record<Side, Rect>;
@@ -118,7 +127,10 @@ function layout(width: number, height: number, variant: TableVariant, extra: Ext
     Math.min(cardHFromHeight / CARD_RATIO, cardHFromColumn / CARD_RATIO, cardWFromWidth, sideChipW, large ? 150 : 84),
   );
   const cardH = cardW * CARD_RATIO;
-  const sideChipH = Math.max(sideChipMin, Math.min(sideChipMax, columnSpace - gap - cardH));
+  // Carta jogada: menor que a base, ancorada do lado de fora (perto da etiqueta de quem jogou).
+  const pw = Math.min(cardW, Math.max(PLAYED_MIN_W, cardW * PLAYED_SCALE));
+  const ph = pw * CARD_RATIO;
+  const sideChipH = Math.max(sideChipMin, Math.min(sideChipMax, columnSpace - gap - ph));
 
   const midX = width / 2;
   const topPlayedY = padTop + endChipH + gap;
@@ -126,7 +138,7 @@ function layout(width: number, height: number, variant: TableVariant, extra: Ext
   // O centro fica no meio do espaço entre a carta de cima e a de baixo.
   const midY = (topPlayedY + cardH + bottomPlayedY) / 2;
   // Colunas laterais (etiqueta + carta) centradas no meio, sem invadir a faixa das etiquetas de cima e de baixo.
-  const columnH = sideChipH + gap + cardH;
+  const columnH = sideChipH + gap + ph;
   const columnMin = padTop + endChipH + gap;
   const columnMax = height - padBottom - (bottomChipVisible ? endChipH + gap : 0) - columnH;
   const columnTop = Math.max(columnMin, Math.min(midY - columnH / 2, columnMax));
@@ -142,10 +154,10 @@ function layout(width: number, height: number, variant: TableVariant, extra: Ext
   };
 
   const played: Record<Side, Rect> = {
-    top: { x: midX - cardW / 2, y: topPlayedY, w: cardW, h: cardH },
-    bottom: { x: midX - cardW / 2, y: bottomPlayedY, w: cardW, h: cardH },
-    left: { x: leftX + (sideChipW - cardW) / 2, y: columnTop + sideChipH + gap, w: cardW, h: cardH },
-    right: { x: rightX + (sideChipW - cardW) / 2, y: columnTop + sideChipH + gap, w: cardW, h: cardH },
+    top: { x: midX - pw / 2, y: topPlayedY, w: pw, h: ph },
+    bottom: { x: midX - pw / 2, y: bottomPlayedY + cardH - ph, w: pw, h: ph },
+    left: { x: leftX + (sideChipW - pw) / 2, y: columnTop + sideChipH + gap, w: pw, h: ph },
+    right: { x: rightX + (sideChipW - pw) / 2, y: columnTop + sideChipH + gap, w: pw, h: ph },
   };
 
   const cw = cardW * centerScale;
@@ -155,8 +167,8 @@ function layout(width: number, height: number, variant: TableVariant, extra: Ext
   const manilhaH = Math.min(ch * 0.62, large ? 48 : 36);
 
   const stageX = leftX + sideChipW + gap;
-  const stageTop = topPlayedY + cardH + gap;
-  const stage = { x: stageX, y: stageTop, w: width - 2 * stageX, h: Math.max(0, bottomPlayedY - gap - stageTop) };
+  const stageTop = played.top.y + ph + gap;
+  const stage = { x: stageX, y: stageTop, w: width - 2 * stageX, h: Math.max(0, played.bottom.y - gap - stageTop) };
 
   return {
     card: { w: cardW, h: cardH },

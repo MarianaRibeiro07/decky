@@ -14,6 +14,8 @@ export type TableCue =
   /** Fala curta junto de quem agiu ("Corro!"). */
   | { kind: 'speech'; seat: Seat; text: string };
 
+const PROPOSAL_END_SPEECH = { rejected: 'Não!', cancelled: 'Desisti', invalidated: 'Cancelado' } as const;
+
 /**
  * Aviso para o último evento, conferido contra o estado que veio junto com ele.
  * Pedido só vira aviso se há pedido pendente no estado; aceite só se o pedido já não está pendente
@@ -21,6 +23,13 @@ export type TableCue =
  */
 export function eventCue(event: PublicEvent | null | undefined, state: PublicGameState): TableCue | null {
   if (!event) return null;
+  // Decisão da dupla: pedido aberto ainda não é ação (nada a anunciar); confirmado vira o aviso da
+  // própria ação (logo abaixo); recusado, desistido ou inválido vira uma fala curta de quem respondeu.
+  const proposal = event.proposal;
+  if (proposal && proposal.status !== 'confirmed') {
+    if (proposal.status === 'opened') return null;
+    return { kind: 'speech', seat: proposal.by, text: PROPOSAL_END_SPEECH[proposal.status] };
+  }
   switch (event.action) {
     case 'request_truco':
       return state.truco ? { kind: 'call', seat: event.seat, value: state.truco.value, raise: false } : null;

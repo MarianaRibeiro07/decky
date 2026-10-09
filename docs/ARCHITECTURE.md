@@ -20,7 +20,7 @@ Supabase
 
 Princípios:
 
-1. **O servidor é a fonte única da verdade.** O cliente envia uma intenção (`play_card`, `request_truco`, `respond_truco`, `fold`) e recebe projeções autorizadas.
+1. **O servidor é a fonte única da verdade.** O cliente envia uma intenção (`play_card`, `request_truco`, `respond_truco`, `fold`, `confirm_proposal`, `reject_proposal`) e recebe projeções autorizadas.
 2. **Nenhuma regra roda só no cliente.** O app usa `getLegalActions` do motor apenas para decidir quais botões mostrar; o servidor valida de novo com a mesma função.
 3. **Segurança no servidor, não no visual.** A mão de outro jogador nunca sai do banco: fica em `private.private_hands` e só a própria mão é entregue por `get_my_hand`.
 4. O dono da sala é só um papel administrativo. Nenhum celular executa regras, nem no modo mesa.
@@ -65,12 +65,12 @@ Princípios:
 | Tipo | Papel | Sensível? |
 |---|---|---|
 | `Room`, `RoomSeat` | Sala (`lobby`, `playing`, `finished`), `hostMode` (`player` ou `table`) e posições 1 a 4, duplas A (1 e 3) e B (2 e 4) | Não |
-| `PublicGameState` | Placar, vira, manilha, vez, valor da mão, truco pendente, cartas na mesa, vazas, última vaza, última mão e `lastEvent` (última ação aceita, para os avisos de truco e a fala "Corro!") | Não |
+| `PublicGameState` | Placar, vira, manilha, vez, valor da mão, truco pendente, cartas na mesa, vazas, última vaza, última mão, `lastEvent` (última ação aceita, para os avisos de truco e a fala "Corro!") e `proposal` (decisão da dupla aguardando o parceiro) | Não |
 | `MatchView` | `PublicGameState` + `revision` + `roomCode` + `tableUserId` | Não |
 | `MatchRole` | `player` (está em `match_players`, tem mão) ou `table` (é o `table_user_id`) | Não |
 | `PrivateHand` | `seat`, `cards`, `revision` do próprio usuário | **Sim** |
 | `ActionRequest` | `{ matchId, action, expectedRevision, clientActionId }` | Não |
-| `GameResult` | `{ ok: true, newRevision }` ou `{ ok: false, error }` | Não |
+| `GameResult` | `{ ok: true, newRevision, state?, hand? }` ou `{ ok: false, error }`. `state` é o estado público gravado e `hand` a mão **de quem agiu** (a mesma de `get_my_hand`); não vêm numa ação repetida | Só `hand`, e só para o dono dela |
 
 ### Operações
 
@@ -113,13 +113,14 @@ O cliente não tem `INSERT/UPDATE/DELETE` em nenhuma tabela, exceto `match_notes
 3. Compara `expectedRevision` com a revisão atual; diferente devolve `conflict` e o app recarrega.
 4. `applyAction(estado, assento, ação)` do motor; regra violada devolve o motivo (`not_your_turn`, `invalid_card`, `illegal_action`).
 5. `internal_commit_action`: trava a linha (`FOR UPDATE`), confere a revisão de novo, grava estado, mãos, evento e `revision + 1`. No fim da partida, a sala volta ao lobby.
+6. Devolve a nova revisão, o estado público gravado e a mão de quem agiu. A tela de quem agiu aplica isso na hora (`applyResult` em `useMatch`), sem esperar a releitura de `matches` e `get_my_hand`.
 
 `start-match` usa o índice único "uma partida ativa por sala" e a trava da sala: chamar duas vezes devolve a mesma partida.
 
 ## Realtime e reconexão
 
 - O app assina `postgres_changes` em `rooms`, `room_players` e `matches` (com RLS). Um aviso de mudança só dispara uma **releitura**; nenhum dado chega pelo canal sem passar pelo RLS.
-- A mão nunca está em subscription: o app chama `get_my_hand` quando a `revision` muda.
+- A mão nunca está em subscription: o app chama `get_my_hand` quando a `revision` muda. Quando a leitura vem de um aviso do Realtime, `matches` e `get_my_hand` são lidos ao mesmo tempo (uma ida ao servidor a menos); se a mão lida em paralelo for mais velha que o estado, ela é relida (`needsHandRead`). No polling, a mão só é lida se a revisão mudou.
 - Polling de segurança (3 a 4 s) e releitura ao voltar do segundo plano cobrem eventos perdidos. Reconectar só lê; ações não são reenviadas.
 - Falha de rede ao enviar uma jogada: o app reenvia com o **mesmo** `clientActionId`, e o servidor não duplica.
 - Uma leitura por vez; um pedido de leitura durante outra agenda mais uma ao final, para não perder a mudança logo depois de uma jogada. Leitura bem-sucedida tira o aviso "Sem conexão", mesmo com o Realtime caído (o polling cobre).
@@ -137,6 +138,8 @@ O projeto Supabase está ligado ao repositório `rbrecci/Decky` pela integraçã
 Configuração que **não** vem do repositório: em Authentication > Providers > Email, desligar "Confirm email" para a demonstração (senão o cadastro exige abrir o e-mail antes de entrar). O app trata os dois casos.
 
 **Esta versão exige:** aplicar a migration `20261008180000_table_mode.sql` e **republicar as duas Edge Functions** (o código delas passou a importar `_shared/match-service.ts`). Sem a migration, criar sala no modo mesa falha; sem republicar as funções, o modo mesa funciona, mas as falas de truco (`lastEvent`) não aparecem e a validação de formato continua a antiga.
+
+**A confirmação em dupla também exige republicar `submit-action`** (o motor e o formato das ações mudaram). Não há migration nova: `proposal` e `proposalSeq` vivem dentro do `public_state` (jsonb) e partidas antigas, sem esses campos, continuam valendo. Com a função antiga publicada, correr e as apostas de 6, 9 e 12 continuam individuais e os botões Confirmar/Não recebem `bad_request`.
 
 Plano B se a integração não publicar as funções: `npx supabase functions deploy start-match submit-action --project-ref yfijjtibyblzuplhtxbd` (pede `supabase login`).
 
@@ -172,7 +175,7 @@ Layout responsivo da mesa:
 - A mesa é uma superelipse: a borda "entra" perto dos cantos, e mais fundo quanto maior a mesa. `tableGeometry` recebe o expoente da forma e recua as etiquetas de cima e de baixo e as colunas laterais pela profundidade da curva sob os cantos (`superellipseDepth`). Um recuo fixo só funcionava num tamanho.
 - Etiquetas em cima e embaixo são largas (avatar ao lado do nome); nas laterais, estreitas e em coluna (avatar em cima). A altura da etiqueta lateral se adapta à altura da mesa; na mesa dedicada baixa, as de cima e de baixo também ficam mais baixas.
 - `stage` é o palco do centro (entre as quatro cartas jogadas, onde ficam baralho e vira). Os avisos de truco aparecem só ali, sem cobrir carta jogada nem etiqueta.
-- O banner de status tem altura fixa (linha principal + uma linha de complemento): se crescesse, a mesa encolheria e tudo mudaria de lugar justo no pedido de truco. Frases curtas usam o primeiro nome.
+- O banner de status tem altura fixa (linha principal + uma linha de complemento): se crescesse, a mesa encolheria e tudo mudaria de lugar justo no pedido de truco. Frases curtas usam o primeiro nome. A altura vem de `bannerHeight` e o conteúdo é centralizado: sem complemento, a linha principal fica no meio. Antes a altura era garantida por uma segunda linha com um espaço, que no Android e no iOS ocupava a linha inteira e deixava "Sua vez!"/"Vez de Bia" acima da metade do banner (no web o espaço sumia, por isso a fixture não mostrava o problema).
 - No aparelho da mesa com menos de 720 pt de altura, placar e banner usam o tamanho compacto, para a mesa ficar com a altura.
 
 Distribuição (`src/game/deal.ts`, animada com React Native Reanimated):
@@ -210,9 +213,32 @@ Regras da animação:
 - Tocar numa carta a seleciona (sobe e ganha borda: vermelha com brilho quando dá para jogar agora, metálica quando ainda não é a vez); "Jogar" ou um segundo toque confirma. Dá para pré-selecionar fora da vez.
 - Fileira de ações, da esquerda para a direita: Correr (contorno, bandeira, longe do polegar), Pedir truco (bronze, setas) e Jogar (laca vermelha, maior, à direita: ação principal). Ícones em SVG (`src/ui/icons.tsx`) em cima do rótulo, para os três caberem numa linha num iPhone SE. O botão de jogar diz por que está parado: "Distribuindo…", "Aguarde a vez" ou "Escolha a carta".
 - Uma trava síncrona impede dois envios por toque duplo; o servidor também é idempotente pelo `clientActionId`.
-- Os botões de truco vêm de `trucoControls`, espelho de `getLegalActions`: pedir (TRUCO, SEIS, NOVE ou DOZE, conforme o valor) e, para a dupla que responde, Aceitar, Correr e Pedir o próximo valor. A dupla que pediu vê "Aguardando a outra dupla responder". Correr sem pedido pendente pede confirmação.
+- Os botões de truco vêm de `trucoControls`, espelho de `getLegalActions`: pedir (TRUCO, SEIS, NOVE ou DOZE, conforme o valor) e, para a dupla que responde, Aceitar, Correr e Pedir o próximo valor. A dupla que pediu vê "Aguardando a outra dupla responder". Os botões que dependem do parceiro dizem isso na dica de acessibilidade ("Seu parceiro precisa confirmar").
 - A carta jogada entra na mesa vindo do lado de quem jogou; a vencedora da vaza é destacada quando a mesa limpa.
 - A vez é destacada (contorno e avatar dourados, selo "VEZ") só quando não há pedido de truco pendente (`activeTurnSeat`), igual na mesa e no painel do jogador. O brilho entra uma vez e fica parado: não pulsa.
+
+## Decisão em dupla
+
+Correr (com ou sem truco pendente) e as apostas de 6, 9 e 12 (pedir, aumentar e aceitar) só valem com os dois integrantes da dupla. TRUCO (3) e o aceite do 3 continuam individuais. A regra está no motor (`teamDecisionFor`, `applyRule`, `answerProposal` em `engine/game.ts`), então vale igual em todos os aparelhos e o servidor recusa qualquer atalho.
+
+Fluxo:
+
+1. Um jogador toca, por exemplo, em Correr. O app envia a ação de sempre (`fold`). O motor confere que ela seria legal agora e, em vez de aplicar, grava `proposal = { id, team, decision, proposedBy, value, handNumber }`. Quem pediu conta como a primeira confirmação. O evento sai com `proposal.status = 'opened'` e não gera aviso na mesa.
+2. Enquanto existe o pedido, **a partida para**: ninguém joga carta, pede truco ou corre (nem a outra dupla), então nada muda por baixo do pedido e a mão não termina antes da resposta. A vez deixa de ser destacada (`activeTurnSeat`).
+3. O parceiro vê "Ana quer correr" no banner e, no lugar da fileira de ações, os avatares da dupla com visto (1 de 2), **Não** e **Confirmar**. Quem pediu vê "Aguardando Caio confirmar" e pode **Desistir do pedido**. A outra dupla vê só "A outra dupla está decidindo…"; a mesa central, "Dupla A decidindo…".
+4. `confirm_proposal { proposalId }` do parceiro: o motor revalida a ação como se quem pediu a fizesse agora (mesma mão, mesmo valor em jogo) e aplica. O evento é o da própria ação (pelo lugar de quem pediu), com `proposal.status = 'confirmed'`: os avisos ("Corro!", "SEIS!", "ACEITO!") saem como antes.
+5. `reject_proposal { proposalId }`: do parceiro, `rejected` (fala "Não!" e aviso para quem pediu); de quem pediu, `cancelled`. Nada é aplicado.
+6. Se na confirmação a ação já não valer (outra mão, valor em jogo diferente), o pedido acaba como `invalidated`, sem efeito, e a dupla é avisada.
+
+Garantias (testadas em `tests/engine/game.test.ts` e, pelo servidor e banco, em `tests/sql/flow.test.ts`):
+
+- Só a própria dupla confirma ou recusa; quem pediu não confirma o próprio pedido (um jogador sozinho não vale pela dupla); a mesa recebe `not_member`.
+- Cada pedido tem um número único na partida (`proposalSeq`, preservado entre mãos): a confirmação de um pedido antigo não vale para um novo.
+- Pedidos simultâneos: o segundo é recusado (`illegal_action`), e a revisão serializa tudo (`conflict` para quem enviou com a revisão velha). Toque duplo na confirmação com o mesmo `clientActionId` não aplica duas vezes.
+- Reconectar só lê: o pedido continua no estado público e ninguém confirma por reconectar.
+- O valor da mão só muda depois da confirmação: a tela nunca mostra o aumento como aceito antes.
+
+Sem expiração por tempo: um pedido sem resposta fica parado até o parceiro responder ou quem pediu desistir (o mesmo que acontece com um truco sem resposta). Expirar exigiria relógio no servidor e uma ação para limpar o pedido.
 
 ## Avisos de truco
 
@@ -241,13 +267,18 @@ Cassino reservado: preto e grafite dominam, a mesa é o destaque. O logo (`asset
 | Tokens | `src/ui/theme.ts`: cores (fundo, superfícies, texto, logo, dourado, mesa, duplas), fontes, tamanhos, espaços, raios e sombras. Telas não definem cores soltas |
 | Tipografia | Playfair Display (`@expo-google-fonts/playfair-display`, pesos 700 e 900) em títulos, saudação e números do placar, com `fontVariant: ['lining-nums']` para os algarismos ficarem alinhados. Textos funcionais, botões e cartas ficam na fonte do sistema. A fonte é carregada em `app/_layout.tsx`; se falhar, o app segue com a do sistema |
 | Mesa | `TableSurface` desenha em SVG (`react-native-svg`, já usado no projeto) o tampo em superelipse: lateral visível embaixo (espessura), aro de couro com costura e reflexo da luminária, trilho metálico, feltro carvão com luz no centro, textura (`assets/textures/felt.png`, 128 px que repete sem emenda) e sombra interna do trilho. É estático e memorizado por tamanho. `surfaceMetrics` diz onde fica o feltro; o `TableBoard` posiciona lugares e cartas nessa área com a mesma `tableGeometry` de antes |
-| Baralho | Faces de Byron Knoll em papel marfim (não branco puro, que ofuscava sobre o preto) e verso do grupo na mesma proporção das faces (500 x 726). `scripts/build_cards.py` aplica o tom e reduz a paleta com pontilhado: o baralho caiu de 4,0 MB para 1,5 MB sem faixas nos degradês. A moldura (`PlayingCard`) tem raio proporcional à largura (`cardRadius`), igual ao canto desenhado na arte |
+| Baralho | Faces de Byron Knoll em papel marfim (não branco puro, que ofuscava sobre o preto) e verso do grupo na mesma proporção das faces (500 x 726). `scripts/build_cards.py` dá margem interna (a arte original encostava índice e naipes no filete; agora é reduzida a 90%, sem deformar, com 5% de papel em cada lado e o filete redesenhado na borda), aplica o tom e reduz a paleta com pontilhado (faces: 1,6 MB). A moldura (`PlayingCard`) tem raio proporcional à largura (`cardRadius`), igual ao canto desenhado na arte |
 | Cartas na mesa | Sombra curta de apoio (`boxShadow`) e leve inclinação por lugar (só `rotate`, sem deformar). A inclinação fica numa view interna para não brigar com a animação de entrada |
 | Profundidade | Sem engine 3D nem perspectiva real: a perspectiva distorceria as cartas e complicaria o toque. A sensação de objeto físico vem da lateral do tampo, das sombras e da luz. Pés da mesa não aparecem porque o enquadramento é de cima |
 | Telas | `Screen` (fundo `Backdrop` + título com filete dourado), `Panel` (superfície grafite), `Button` (`primary` laca vermelha, `dark` grafite, `secondary` contorno, `gold` bronze, `ghost` só texto; estados pressionado, desabilitado e carregando) e `FeltPanel` (bandeja de feltro do HUD e do lobby, em retângulo com cantos de raio fixo: assim o recuo do conteúdo vale em qualquer tamanho) |
 | Jogadores | Avatar em forma de ficha de cassino (`PlayerAvatar`): aro na cor da dupla, iniciais em creme na Playfair; na vez, aro dourado. Nome em destaque (reticências quando não cabe, ou até duas linhas na sala), dupla em versalete na cor da dupla e cartas na mão como três silhuetas (cheias as que restam), no lugar dos versos em miniatura, que ficavam ilegíveis |
 
 Sombras usam `boxShadow`, que no React Native 0.86 funciona no Android e no iOS (nova arquitetura). Cartas voando na distribuição não têm sombra, para não pesar.
+
+Tamanhos das cartas por função:
+
+- **Mão (sem mesa dedicada):** `handCardWidth` em `HandPanel`, até 124 pt e 14% da altura da tela (antes 112 pt e 13%), com recuo lateral menor no painel. Num celular de 390 x 844 a carta passa de ~110 para ~118 pt. Com mesa dedicada a mão não mudou.
+- **Cartas jogadas na mesa:** 88% da carta-base (`PLAYED_SCALE` em `geometry.ts`), nunca abaixo de 38 pt, ancoradas do lado de quem jogou. Baralho e vira continuam do mesmo tamanho; o espaço liberado fica no palco do centro (avisos de truco).
 
 Custo da borda da mesa: o aro tira espaço das cartas, e agora nada avança sobre ele (antes as plaquinhas dos lugares ficavam sobre o couro e passavam do trilho perto dos cantos). Para compensar, o aro ficou um pouco mais fino e as etiquetas de cima e de baixo, mais baixas. Medido com `tableGeometry`: a carta da mesa dedicada em 395 x 560 tem cerca de 71 pt de largura; o teste mantém o mínimo de 38 pt no celular pequeno (344 x 250, metade de cima).
 
@@ -262,6 +293,11 @@ Gargalos encontrados e corrigidos (outubro/2026):
 | Verso da carta de 1024 x 1536 (2,2 MB) decodificado em até ~25 imagens durante a distribuição | `assets/cards/back.png`, 400 x 600 (0,35 MB) |
 | Canal Realtime reaproveitado ao remontar a tela (erro e assinatura perdida) | Nome de canal único por montagem |
 | Mesa com materiais realistas sem custo por quadro | Tampo em SVG estático com `memo` (redesenha só quando o tamanho muda), textura de 20 KB, nenhum filtro de desfoque; a seleção da carta anima na thread de UI (Reanimated) |
+| Depois de cada ação, o aparelho de quem agiu esperava `submit-action` e mais duas leituras em série (`matches`, depois `get_my_hand`) antes de mostrar o resultado e liberar os botões | `submit-action` devolve o estado gravado e a mão de quem agiu; a tela aplica na hora (`applyResult`). Só relê em erro, conflito ou ação repetida |
+| Nos outros aparelhos, cada aviso do Realtime lia `matches` e só depois `get_my_hand` | Com aviso de mudança, as duas leituras saem juntas (`needsHandRead` relê a mão se ela vier mais velha que o estado) |
+| Lobby redesenhava a cada polling de 3 s mesmo sem mudança | `sameRoomState` mantém o objeto quando sala, lugares e partida são os mesmos |
+
+As melhorias de rede acima foram verificadas por teste (o que é lido e quando), não medidas em aparelhos com o Supabase real: o ganho esperado é uma ida e volta ao servidor a menos por atualização nos outros aparelhos e duas a menos para quem agiu, mas o tempo real depende da rede.
 
 A versão das bibliotecas de animação é a que o Expo 57 espera (`react-native-reanimated` 4.5.1, `react-native-worklets` 0.10.1; `npx expo install --check` sem pendências), e o `babel-preset-expo` já inclui o plugin de worklets: não há `babel.config.js` a configurar.
 

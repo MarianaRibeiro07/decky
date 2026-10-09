@@ -8,12 +8,15 @@ export type {
   HandSummary,
   HandValue,
   PublicEvent,
+  ProposalStatus,
   PublicGameState,
   Rank,
   Seat,
   Suit,
   TableCard,
   Team,
+  TeamDecision,
+  TeamProposal,
   TrickResult,
   TrucoRequest,
   TrucoResponse,
@@ -101,7 +104,14 @@ export type GameError =
   | 'server_error'
   | 'network_error';
 
-export type GameResult = { ok: true; newRevision: number } | { ok: false; error: GameError };
+/**
+ * Resposta do submit-action. No sucesso pode vir o estado público já gravado e a mão de quem agiu
+ * (a tela aplica na hora, sem esperar a releitura); numa ação repetida (mesmo clientActionId) ou num
+ * servidor antigo, vem só a revisão e a tela relê.
+ */
+export type GameResult =
+  | { ok: true; newRevision: number; state?: PublicGameState; hand?: PrivateHand }
+  | { ok: false; error: GameError };
 
 export type StartMatchResult = { ok: true; matchId: string } | { ok: false; error: string };
 
