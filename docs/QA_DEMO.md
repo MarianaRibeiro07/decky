@@ -67,10 +67,23 @@ Cada história tem seus critérios em [PRODUCT_BACKLOG.md](PRODUCT_BACKLOG.md). 
 - [ ] Usuário B não vê, edita nem apaga nota de A.
 - [ ] Editar nota não altera resultado da partida.
 
-### Modo mesa (P1)
+### Modo mesa (5 aparelhos)
 
-- [ ] Quinto aparelho entra sem ocupar posição.
-- [ ] Mostra só estado público; consulta de mão devolve vazio.
+- [ ] "Criar sala" > "Este celular será a mesa": o dono não ocupa lugar e os 4 lugares ficam livres.
+- [ ] Os 4 jogadores entram e marcam pronto; a mesa inicia a partida.
+- [ ] A mesa mostra placar das duplas com nomes, vez, vira, manilha, cartas jogadas e versos restantes, e nenhuma carta de mão.
+- [ ] Com o token da mesa, `get_my_hand` devolve vazio e `submit-action` devolve `not_member`.
+- [ ] Fechar o app da mesa não interrompe a partida nos 4 celulares; reabrir mostra o estado atual.
+- [ ] No lobby, o dono troca entre "quero jogar" e "este celular será a mesa".
+
+### Mesa e distribuição animada
+
+- [ ] Ao iniciar, as cartas saem do baralho para os 4 lugares; cada jogador vê as 3 cartas chegando; a vira é revelada e a manilha indicada.
+- [ ] A partir da 2ª mão, a última vaza aparece por um instante antes da nova distribuição.
+- [ ] Reabrir o app no meio da mão não repete a distribuição.
+- [ ] Tocar numa carta a seleciona; "Jogar" confirma; a carta sai da mão e aparece na posição de quem jogou nos outros aparelhos.
+- [ ] Toque duplo rápido em "Jogar" envia uma jogada só.
+- [ ] Pedido de truco: a dupla adversária vê Aceitar, Correr e Pedir SEIS; o parceiro de quem pediu só aguarda; a mesa mostra o pedido.
 
 ## Roteiro de demonstração (4 dispositivos)
 
@@ -78,7 +91,7 @@ Tempo-alvo e falas por pessoa ficam com a Mariana (T-MAR-04). Sequência:
 
 1. Login inválido, depois válido; mostrar a REGEX. (Nicoly)
 2. Criar sala e mostrar o código; três aparelhos entram. (Caio)
-3. Iniciar partida; mostrar que cada aparelho vê 3 cartas diferentes e a vira pública. (Caio e Rafael)
+3. Iniciar partida; mostrar a distribuição animada, que cada aparelho vê 3 cartas diferentes e a vira pública. Se houver um quinto celular, criar a sala no modo mesa e deixá-lo no centro. (Caio e Rafael)
 4. Jogar uma carta e ver a sincronização nos 4 aparelhos. (Eduardo)
 5. Pedir truco, responder, e ver o placar mudar sozinho. (Eduardo)
 6. Mostrar o fim de mão, ou o fim de partida se couber. (Eduardo)
@@ -93,5 +106,6 @@ Regra: **nunca fingir funcionalidade**. Se um trecho falhar:
 
 - Avisar a plateia que aquele trecho é uma demonstração controlada.
 - Usar a fixture: uma partida pré-criada no banco, em estado já avançado, identificada com título "FIXTURE" na tela e na fala.
+- Para mostrar só a interface (sem servidor), a rota `/dev/preview` do build de desenvolvimento simula uma partida no próprio aparelho, com a barra "FIXTURE LOCAL · sem servidor" visível. Dizer em voz alta que é simulação.
 - Se o motor falhar ao vivo, mostrar a suíte de testes unitários rodando e os casos cobertos.
 - Mostrar a limitação correspondente de [RULES.md](RULES.md) quando a falha vier de regra não decidida.

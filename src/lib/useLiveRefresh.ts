@@ -26,19 +26,31 @@ export function useLiveRefresh(
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
-  const running = useRef(false);
+  const running = useRef<Promise<void> | null>(null);
+  const again = useRef(false);
 
-  const refreshNow = useCallback(async () => {
-    if (running.current) return;
-    running.current = true;
-    try {
-      await refreshRef.current();
-      setStatus((s) => (s === 'connecting' ? 'online' : s));
-    } catch {
-      setStatus('reconnecting');
-    } finally {
-      running.current = false;
+  // Uma leitura por vez. Pedido durante uma leitura agenda mais uma no fim, para não perder
+  // a mudança que motivou o pedido (ex.: logo depois de uma jogada).
+  const refreshNow = useCallback((): Promise<void> => {
+    if (running.current) {
+      again.current = true;
+      return running.current;
     }
+    const run = async () => {
+      do {
+        again.current = false;
+        try {
+          await refreshRef.current();
+          // Leitura bem-sucedida: os dados estão em dia, mesmo que o Realtime esteja caído (o polling cobre).
+          setStatus('online');
+        } catch {
+          setStatus('reconnecting');
+        }
+      } while (again.current);
+      running.current = null;
+    };
+    running.current = run();
+    return running.current;
   }, []);
 
   const watchKey = JSON.stringify(watches);
@@ -57,7 +69,6 @@ export function useLiveRefresh(
     }
     channel.subscribe((state) => {
       if (state === 'SUBSCRIBED') {
-        setStatus('online');
         refreshNow();
       } else if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' || state === 'CLOSED') {
         setStatus('reconnecting');

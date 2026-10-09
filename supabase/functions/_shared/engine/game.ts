@@ -101,6 +101,7 @@ export function startHand(
       trickResults: [],
       lastTrick: null,
       lastHand,
+      lastEvent: null,
       winnerTeam: null,
     },
   };
@@ -118,8 +119,15 @@ function maoDeOnzeFor(score: Record<Team, number>): Team | 'both' | null {
 /**
  * Aplica uma ação ao estado. Função pura: não altera o estado recebido.
  * rng só é usado quando a ação encerra a mão e outra precisa ser distribuída.
+ * O evento público aceito fica em `lastEvent`, para todos os aparelhos mostrarem o que aconteceu.
  */
 export function applyAction(state: MatchState, seat: Seat, action: GameAction, rng: Rng): ApplyResult {
+  const result = applyRule(state, seat, action, rng);
+  if (!result.ok) return result;
+  return { ...result, state: { ...result.state, public: { ...result.state.public, lastEvent: result.event } } };
+}
+
+function applyRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng): ApplyResult {
   const pub = state.public;
   if (pub.status !== 'playing') return { ok: false, error: 'match_over' };
 

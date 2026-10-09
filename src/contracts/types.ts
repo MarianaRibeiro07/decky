@@ -7,6 +7,7 @@ export type {
   GameActionType,
   HandSummary,
   HandValue,
+  PublicEvent,
   PublicGameState,
   Rank,
   Seat,
@@ -27,10 +28,18 @@ export interface UserProfile {
 
 export type RoomStatus = 'lobby' | 'playing' | 'finished';
 
+/**
+ * Papel do dono da sala, escolhido ao criar.
+ * 'player': o dono ocupa um lugar e joga (4 aparelhos).
+ * 'table': o dono não joga; o aparelho dele mostra só a mesa pública (5 aparelhos).
+ */
+export type HostMode = 'player' | 'table';
+
 export interface Room {
   id: string;
   code: string;
   hostUserId: string;
+  hostMode: HostMode;
   status: RoomStatus;
 }
 
@@ -57,7 +66,12 @@ export interface MatchView {
   roomCode: string | null;
   revision: number;
   state: PublicGameState;
+  /** Aparelho que atua como mesa (modo 'table'); null quando o dono joga. */
+  tableUserId: string | null;
 }
+
+/** Como este aparelho participa da partida: jogador com mão privada ou mesa só de leitura. */
+export type MatchRole = 'player' | 'table';
 
 /** Mão privada: só a do próprio usuário, via get_my_hand. */
 export interface PrivateHand {

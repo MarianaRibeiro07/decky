@@ -1,0 +1,215 @@
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Animated, { FadeIn, FadeInDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
+import type { LegalActions } from '../../../supabase/functions/_shared/engine/game.ts';
+import type { Card, GameAction, PrivateHand, PublicGameState, Seat } from '../../contracts/types';
+import { Button } from '../../ui/Button';
+import { Notice } from '../../ui/Notice';
+import { cardLabel, PlayingCard } from '../../ui/PlayingCard';
+import { colors, font, radius, space } from '../../ui/theme';
+import { trucoControls, type Control } from '../controls';
+import { dealBoundaries, landingTimes } from '../deal';
+import type { DealAnimation } from '../useDealAnimation';
+
+const keyOf = (card: Card) => `${card.rank}_${card.suit}`;
+
+/**
+ * Quantas cartas da própria mão já "chegaram" na distribuição animada: cada uma entra na mão
+ * quando a carta voadora correspondente pousa. Sem animação, todas (3).
+ */
+function useArrivedCards(deal: DealAnimation, dealing: boolean, dealerSeat: Seat, mySeat: Seat): number {
+  const [arrived, setArrived] = useState(3);
+  const run = deal.run;
+
+  useEffect(() => {
+    if (!run || !dealing) {
+      setArrived(3);
+      return;
+    }
+    const start = run.startedAt + dealBoundaries(run.intro).dealing;
+    const waits = landingTimes(dealerSeat, mySeat).map((t) => start + t - Date.now());
+    setArrived(waits.filter((w) => w <= 0).length);
+    const timers = waits.filter((w) => w > 0).map((w) => setTimeout(() => setArrived((n) => Math.min(3, n + 1)), w));
+    return () => timers.forEach(clearTimeout);
+  }, [run, dealing, dealerSeat, mySeat]);
+
+  return arrived;
+}
+
+interface Props {
+  state: PublicGameState;
+  hand: PrivateHand | null;
+  mySeat: Seat;
+  legal: LegalActions;
+  deal: DealAnimation;
+  /** Chave da ação em envio (desabilita tudo e mostra carregando no botão certo). */
+  busy: string | null;
+  error: string | null;
+  onAct: (key: string, action: GameAction) => void;
+  /** Área segura de baixo (barra de gestos), somada ao espaçamento do painel. */
+  bottomInset: number;
+}
+
+/**
+ * Metade de baixo da tela do jogador: as três cartas privadas e os controles.
+ * Fluxo da carta: tocar seleciona (a carta sobe e ganha borda), confirmar envia ao servidor.
+ * Tocar de novo na carta selecionada também confirma.
+ */
+export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct, bottomInset }: Props) {
+  const { width, height } = useWindowDimensions();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [confirmFold, setConfirmFold] = useState(false);
+
+  const cards = hand?.cards ?? [];
+  const dealing = deal.phase === 'intro' || deal.phase === 'dealing';
+  const canPlay = legal.playCard && !busy && !dealing;
+  const { mode, controls } = trucoControls(state, legal);
+  const selectedCard = cards.find((c) => keyOf(c) === selected) ?? null;
+
+  // A seleção some quando a carta sai da mão (jogada aceita ou mão nova) ou quando surge um pedido de truco.
+  useEffect(() => {
+    if (selected && !cards.some((c) => keyOf(c) === selected)) setSelected(null);
+  }, [cards, selected]);
+  useEffect(() => {
+    if (state.truco) {
+      setSelected(null);
+      setConfirmFold(false);
+    }
+  }, [state.truco]);
+
+  const cardW = Math.min(112, (width - space.md * 2 - space.sm * 2) / 3, height * 0.13);
+
+  function tapCard(card: Card) {
+    if (dealing || busy) return;
+    const key = keyOf(card);
+    if (selected === key && canPlay) {
+      onAct(`card-${key}`, { type: 'play_card', card });
+      return;
+    }
+    setSelected(selected === key ? null : key);
+  }
+
+  function press(control: Control) {
+    if (control.confirm) setConfirmFold(true);
+    else onAct(control.id, control.action);
+  }
+
+  const arrived = useArrivedCards(deal, dealing, state.dealerSeat, mySeat);
+
+  return (
+    <View style={[styles.panel, { paddingBottom: space.sm + bottomInset }]}>
+      <Notice kind="error" message={error} />
+
+      <View style={[styles.hand, { minHeight: cardW * 1.452 + 30 }]} accessibilityLabel="Suas cartas">
+        {cards.slice(0, arrived).map((card) => {
+          const key = keyOf(card);
+          const isSelected = key === selected;
+          const manilha = card.rank === state.manilhaRank;
+          return (
+            <Animated.View
+              key={`${state.handNumber}-${key}`}
+              entering={dealing ? FadeInDown.duration(260) : FadeIn.duration(200)}
+              exiting={FadeOutUp.duration(220)}
+              layout={LinearTransition.duration(200)}
+              style={[styles.slot, isSelected && styles.slotSelected]}
+            >
+              <PlayingCard
+                card={card}
+                width={cardW}
+                selected={isSelected}
+                highlighted={manilha && !isSelected}
+                dimmed={busy === `card-${key}`}
+                disabled={dealing || !!busy}
+                onPress={() => tapCard(card)}
+                hint={
+                  isSelected
+                    ? canPlay
+                      ? 'Selecionada. Toque de novo ou em Jogar para confirmar'
+                      : 'Selecionada. Espere a sua vez para jogar'
+                    : 'Toque para selecionar'
+                }
+              />
+              <Text style={[styles.cardTag, manilha && styles.cardTagManilha]}>{manilha ? '★ manilha' : ' '}</Text>
+            </Animated.View>
+          );
+        })}
+        {hand && cards.length === 0 && state.status === 'playing' ? (
+          <Text style={styles.empty}>Sem cartas nesta mão. Aguarde a próxima.</Text>
+        ) : null}
+      </View>
+
+      {confirmFold ? (
+        <Animated.View entering={FadeIn.duration(150)} style={styles.confirm}>
+          <Text style={styles.confirmText}>
+            Correr? A outra dupla ganha {state.maoDeOnze === (mySeat % 2 === 1 ? 'A' : 'B') ? 1 : state.handValue}{' '}
+            ponto(s) e começa outra mão.
+          </Text>
+          <View style={styles.row}>
+            <Button label="Continuar" variant="secondary" size="compact" style={styles.grow} onPress={() => setConfirmFold(false)} />
+            <Button
+              label="Sim, correr"
+              variant="primary"
+              size="compact"
+              style={styles.grow}
+              loading={busy === 'fold'}
+              disabled={!!busy}
+              onPress={() => {
+                setConfirmFold(false);
+                onAct('fold', { type: 'fold' });
+              }}
+            />
+          </View>
+        </Animated.View>
+      ) : mode === 'respond' ? (
+        <View style={styles.row} accessibilityLabel="Responder ao pedido de truco">
+          {controls.map((c) => (
+            <Button key={c.id} label={c.label} hint={c.hint} variant={c.variant} size="compact" style={styles.grow}
+              loading={busy === c.id} disabled={!!busy} onPress={() => press(c)} />
+          ))}
+        </View>
+      ) : mode === 'waiting_answer' ? (
+        <Text style={styles.waiting}>Pedido feito. Aguardando a outra dupla responder…</Text>
+      ) : mode === 'play' ? (
+        <View style={styles.row}>
+          <Button
+            label={legal.playCard ? 'Jogar' : 'Aguarde a vez'}
+            hint={selectedCard ? `Joga ${cardLabel(selectedCard)} na mesa` : 'Selecione uma carta primeiro'}
+            variant="primary"
+            size="compact"
+            style={styles.play}
+            disabled={!selectedCard || !canPlay}
+            loading={!!selectedCard && busy === `card-${keyOf(selectedCard)}`}
+            onPress={() => selectedCard && onAct(`card-${keyOf(selectedCard)}`, { type: 'play_card', card: selectedCard })}
+          />
+          {controls.map((c) => (
+            <Button key={c.id} label={c.label} hint={c.hint} variant={c.variant} size="compact" style={styles.grow}
+              loading={busy === c.id} disabled={!!busy || dealing} onPress={() => press(c)} />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  panel: {
+    backgroundColor: colors.cream,
+    paddingHorizontal: space.md,
+    paddingTop: space.sm,
+    gap: space.sm,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+  },
+  hand: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', gap: space.sm, paddingTop: 14 },
+  slot: { alignItems: 'center' },
+  slotSelected: { transform: [{ translateY: -14 }] },
+  cardTag: { fontSize: font.small - 2, color: colors.ink, fontWeight: '700', marginTop: 2 },
+  cardTagManilha: { color: colors.redDark },
+  empty: { fontSize: font.body, color: colors.muted, alignSelf: 'center', textAlign: 'center' },
+  row: { flexDirection: 'row', gap: space.sm },
+  grow: { flex: 1 },
+  play: { flex: 1.3 },
+  waiting: { fontSize: font.body, color: colors.ink, fontWeight: '700', textAlign: 'center', paddingVertical: space.sm },
+  confirm: { gap: space.sm },
+  confirmText: { fontSize: font.body - 1, color: colors.ink, fontWeight: '700', textAlign: 'center' },
+});

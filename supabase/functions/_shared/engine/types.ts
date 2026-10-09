@@ -55,6 +55,8 @@ export interface PublicGameState {
   trickResults: TrickResult[];
   lastTrick: { cards: TableCard[]; result: TrickResult } | null;
   lastHand: HandSummary | null;
+  /** Última ação aceita pelo servidor. Opcional: partidas gravadas antes desta versão não têm. */
+  lastEvent?: PublicEvent | null;
   winnerTeam: Team | null;
 }
 

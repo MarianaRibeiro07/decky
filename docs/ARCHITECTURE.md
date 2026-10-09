@@ -1,6 +1,6 @@
 # Arquitetura
 
-Estado: **implementado** e testado localmente (motor, SQL e validações). Falta verificar em 4 aparelhos com o Supabase real; ver "Deploy" abaixo.
+Estado: **implementado** e testado localmente (motor, SQL, fluxo das Edge Functions contra o banco e lógica da interface). Falta verificar em 4 ou 5 aparelhos com o Supabase real; ver "Deploy" abaixo.
 
 ## Visão geral
 
@@ -23,21 +23,30 @@ Princípios:
 1. **O servidor é a fonte única da verdade.** O cliente envia uma intenção (`play_card`, `request_truco`, `respond_truco`, `fold`) e recebe projeções autorizadas.
 2. **Nenhuma regra roda só no cliente.** O app usa `getLegalActions` do motor apenas para decidir quais botões mostrar; o servidor valida de novo com a mesma função.
 3. **Segurança no servidor, não no visual.** A mão de outro jogador nunca sai do banco: fica em `private.private_hands` e só a própria mão é entregue por `get_my_hand`.
-4. O dono da sala é só um papel administrativo. Nenhum celular executa regras.
+4. O dono da sala é só um papel administrativo. Nenhum celular executa regras, nem no modo mesa.
+5. Animação é representação. A distribuição animada e as cartas entrando na mesa só desenham o estado que o servidor já gravou; nenhuma regra espera uma animação terminar.
 
 ## Mapa do código
 
 | Caminho | O que é |
 |---|---|
 | `supabase/functions/_shared/engine/` | Motor do Truco Paulista: baralho, força, vazas, truco, placar. Sem I/O |
-| `supabase/functions/start-match/` | Edge Function: sorteia e cria a partida (idempotente) |
-| `supabase/functions/submit-action/` | Edge Function: valida a revisão, aplica a regra, grava |
+| `supabase/functions/_shared/match-service.ts` | Núcleo das duas Edge Functions, sem Deno: valida o formato da ação, aplica o motor e grava pelas funções internas. Testado contra o banco em `tests/sql/flow.test.ts` |
+| `supabase/functions/start-match/` | Edge Function (casca): autentica e chama `startMatchService` |
+| `supabase/functions/submit-action/` | Edge Function (casca): autentica e chama `submitActionService` |
 | `supabase/functions/_shared/http.ts` | CORS, autenticação e cliente de serviço das funções |
 | `supabase/migrations/` | Tabelas, RLS, RPCs de sala, funções internas, notas |
 | `supabase/config.toml` | Declara as Edge Functions para o deploy pela integração GitHub |
 | `src/contracts/types.ts` | Contratos (T-00). Tipos do jogo reexportados do motor |
 | `src/rooms/` | API de salas e `useRoom` (lobby em tempo real) |
-| `src/game/` | API da partida, `useMatch` (estado público + mão), textos da mesa |
+| `src/game/` | API da partida, `useMatch` (estado público, mão e papel do aparelho), textos da mesa |
+| `src/game/PlayerGame.tsx`, `src/game/TableGame.tsx` | As duas telas de partida: jogador (mesa em cima, mão embaixo) e mesa central (só público) |
+| `src/game/components/` | `TableBoard` (mesa compartilhada pelos dois modos), `DealLayer` (distribuição animada), `ViraCard`, `SeatChip`, `ScoreBar`, `StatusBanner`, `HandPanel` (mão e controles), `FinishedOverlay` |
+| `src/game/deal.ts`, `useDealAnimation.ts` | Ordem e cronograma da distribuição e a regra "anima uma vez por mão" |
+| `src/game/geometry.ts` | Posições da mesa (puro, testado: nada se sobrepõe) |
+| `src/game/controls.ts`, `status.ts` | Botões de truco legais e a linha de status (puros, testados) |
+| `app/room/create.tsx` | Criar sala escolhendo o modo (dono joga ou é a mesa) |
+| `app/dev/preview.tsx` | **Fixture local, só em desenvolvimento**: simula o servidor com o motor para ver a mesa sem Supabase |
 | `src/lib/useLiveRefresh.ts` | Realtime + polling de segurança + recarga ao voltar do segundo plano |
 | `src/history/` | Histórico e CRUD de notas |
 | `src/auth/` | Sessão, cadastro, login e validação por REGEX |
@@ -49,9 +58,10 @@ Princípios:
 
 | Tipo | Papel | Sensível? |
 |---|---|---|
-| `Room`, `RoomSeat` | Sala (`lobby`, `playing`, `finished`) e posições 1 a 4, duplas A (1 e 3) e B (2 e 4) | Não |
-| `PublicGameState` | Placar, vira, manilha, vez, valor da mão, truco pendente, cartas na mesa, vazas, última vaza e última mão | Não |
-| `MatchView` | `PublicGameState` + `revision` + `roomCode` | Não |
+| `Room`, `RoomSeat` | Sala (`lobby`, `playing`, `finished`), `hostMode` (`player` ou `table`) e posições 1 a 4, duplas A (1 e 3) e B (2 e 4) | Não |
+| `PublicGameState` | Placar, vira, manilha, vez, valor da mão, truco pendente, cartas na mesa, vazas, última vaza, última mão e `lastEvent` (última ação aceita, para as falas "TRUCO!", "Aceito!") | Não |
+| `MatchView` | `PublicGameState` + `revision` + `roomCode` + `tableUserId` | Não |
+| `MatchRole` | `player` (está em `match_players`, tem mão) ou `table` (é o `table_user_id`) | Não |
 | `PrivateHand` | `seat`, `cards`, `revision` do próprio usuário | **Sim** |
 | `ActionRequest` | `{ matchId, action, expectedRevision, clientActionId }` | Não |
 | `GameResult` | `{ ok: true, newRevision }` ou `{ ok: false, error }` | Não |
@@ -60,12 +70,13 @@ Princípios:
 
 | Operação | Tipo | Quem chama | Efeito |
 |---|---|---|---|
-| `create_room()` | RPC | autenticado | Cria sala com código de 6 caracteres e senta o dono no lugar 1 |
-| `join_room(code)` | RPC | autenticado | Ocupa o primeiro lugar livre. Erros: `room_not_found`, `room_full`, `room_started`, `already_in_room` |
+| `create_room(p_host_mode = 'player')` | RPC | autenticado | Cria sala com código de 6 caracteres. Modo `player`: senta o dono no lugar 1. Modo `table`: o dono não ocupa lugar |
+| `set_host_mode(room_id, mode)` | RPC | dono, no lobby | Troca o papel do dono: `table` libera o lugar dele; `player` o senta no primeiro lugar livre (`room_full` se não houver) |
+| `join_room(code)` | RPC | autenticado | Ocupa o primeiro lugar livre. Erros: `room_not_found`, `room_full`, `room_started`, `already_in_room` (inclusive para o dono que é a mesa) |
 | `change_seat(room_id, seat)` | RPC | membro | Troca para lugar livre (`seat_taken` se ocupado) e zera o pronto |
 | `set_ready(room_id, ready)` | RPC | membro | Marca pronto |
-| `leave_room(room_id)` | RPC | membro | Sai no lobby; o dono passa a sala adiante; sala vazia é apagada |
-| `start-match { roomId }` | Edge Function | dono | Idempotente; sorteia no servidor e grava mãos e vira |
+| `leave_room(room_id)` | RPC | membro ou dono | Sai no lobby; o dono passa a sala adiante (que volta ao modo `player`); sem ninguém, a sala é apagada |
+| `start-match { roomId }` | Edge Function | dono | Idempotente; sorteia no servidor e grava mãos e vira. No modo `table`, grava `matches.table_user_id` |
 | `get_my_hand(match_id)` | RPC | jogador | Devolve **somente** a própria mão |
 | `submit-action { ... }` | Edge Function | jogador | Valida revisão e regra, grava evento e novo estado |
 | CRUD de `match_notes` | tabela | autor | RLS por `author_user_id` e participação na partida |
@@ -77,11 +88,11 @@ As funções `internal_start_match`, `internal_get_match` e `internal_commit_act
 | Tabela | Chaves e restrições principais | Visibilidade |
 |---|---|---|
 | `profiles` | PK `id` = `auth.users.id`; criado por trigger no cadastro | autenticados (só o nome) |
-| `rooms` | PK `id`; `code` UNIQUE e CHECK de formato; FK `host_user_id` | membros da sala |
+| `rooms` | PK `id`; `code` UNIQUE e CHECK de formato; FK `host_user_id`; `host_mode` CHECK (`player`, `table`) | membros da sala e o dono |
 | `room_players` | PK `id`; FK `room_id`, `user_id`; UNIQUE `(room_id, user_id)` e `(room_id, seat)`; CHECK `seat` 1 a 4; `team` gerado pelo assento | membros da sala |
-| `matches` | PK `id`; FK `room_id`; `public_state` jsonb; `revision`; placar; índice único de uma partida ativa por sala | membros da partida |
-| `match_players` | PK `(match_id, user_id)`; UNIQUE `(match_id, seat)` | membros da partida |
-| `match_events` | PK `id`; FK `match_id`, `actor_user_id`; UNIQUE `(match_id, client_action_id)` | membros da partida |
+| `matches` | PK `id`; FK `room_id`; `public_state` jsonb; `revision`; placar; FK `table_user_id` (mesa, ou null); índice único de uma partida ativa por sala | jogadores e mesa (`is_match_viewer`) |
+| `match_players` | PK `(match_id, user_id)`; UNIQUE `(match_id, seat)` | jogadores e mesa |
+| `match_events` | PK `id`; FK `match_id`, `actor_user_id`; UNIQUE `(match_id, client_action_id)` | jogadores e mesa |
 | `private.private_hands` | PK `(match_id, seat)`; schema sem GRANT para `anon`/`authenticated` | **ninguém direto** |
 | `match_notes` | PK `id`; FK `match_id`, `author_user_id` | só o autor |
 
@@ -105,6 +116,8 @@ O cliente não tem `INSERT/UPDATE/DELETE` em nenhuma tabela, exceto `match_notes
 - A mão nunca está em subscription: o app chama `get_my_hand` quando a `revision` muda.
 - Polling de segurança (3 a 4 s) e releitura ao voltar do segundo plano cobrem eventos perdidos. Reconectar só lê; ações não são reenviadas.
 - Falha de rede ao enviar uma jogada: o app reenvia com o **mesmo** `clientActionId`, e o servidor não duplica.
+- Uma leitura por vez; um pedido de leitura durante outra agenda mais uma ao final, para não perder a mudança logo depois de uma jogada. Leitura bem-sucedida tira o aviso "Sem conexão", mesmo com o Realtime caído (o polling cobre).
+- A tela da partida fica acesa (`useScreenAwake`), importante para a mesa central.
 
 ## Deploy
 
@@ -115,11 +128,56 @@ O projeto Supabase está ligado ao repositório `rbrecci/Decky` pela integraçã
 
 Configuração que **não** vem do repositório: em Authentication > Providers > Email, desligar "Confirm email" para a demonstração (senão o cadastro exige abrir o e-mail antes de entrar). O app trata os dois casos.
 
+**Esta versão exige:** aplicar a migration `20261008180000_table_mode.sql` e **republicar as duas Edge Functions** (o código delas passou a importar `_shared/match-service.ts`). Sem a migration, criar sala no modo mesa falha; sem republicar as funções, o modo mesa funciona, mas as falas de truco (`lastEvent`) não aparecem e a validação de formato continua a antiga.
+
 Plano B se a integração não publicar as funções: `npx supabase functions deploy start-match submit-action --project-ref yfijjtibyblzuplhtxbd` (pede `supabase login`).
 
-## Modo mesa (P1)
+## Modos de host
 
-**Não implementado.** Proposta mantida: tabela `room_viewers (room_id, user_id)` e políticas de leitura só do estado público; `get_my_hand` já devolve vazio para quem não está em `match_players`.
+O dono escolhe ao criar a sala (`app/room/create.tsx`) e pode trocar no lobby, antes de iniciar.
+
+| | Modo `player` (4 aparelhos) | Modo `table` (5 aparelhos) |
+|---|---|---|
+| Dono | Ocupa um dos 4 lugares e joga | Não ocupa lugar, não tem mão, não joga |
+| Tela do dono | Mesa em cima, mão embaixo (`PlayerGame`) | Mesa central em tela cheia (`TableGame`) |
+| Tela dos jogadores | `PlayerGame` | `PlayerGame` |
+| `matches.table_user_id` | null | id do dono |
+
+Segurança do modo mesa, garantida no banco (testada em `tests/sql/table-mode.test.ts` e `tests/sql/flow.test.ts`):
+
+- A mesa lê `matches`, `match_players` e `match_events` por `is_match_viewer` (jogador **ou** `table_user_id`). Nada além do estado público.
+- `get_my_hand` devolve `null` para a mesa: ela não está em `private.private_hands`.
+- `internal_get_match` exige estar em `match_players`, então `submit-action` responde `not_member` a qualquer ação da mesa.
+- O dono administra a sala (iniciar, trocar o modo), mas o servidor não depende do aparelho dele: se a mesa fechar o app, a partida segue nos 4 celulares.
+
+O app decide qual tela mostrar pelo que o servidor entregou (`resolveRole` em `src/game/role.ts`), nunca por parâmetro de rota.
+
+## Mesa e distribuição animada
+
+`TableBoard` desenha a mesma mesa nos dois modos; muda só a escala (`compact` na metade de cima do jogador, `large` na mesa central). As posições vêm de `tableGeometry`, que garante que lugares, cartas jogadas, baralho, vira e selo da manilha não se sobrepõem (teste em `tests/app/table.test.ts`). Quem olha fica sempre embaixo; a mesa central põe o lugar 1 embaixo.
+
+Distribuição (`src/game/deal.ts`, animada com React Native Reanimated):
+
+1. O servidor já embaralhou e gravou as mãos quando o app recebe a mão nova (`handNumber` novo, sem carta jogada).
+2. A partir da 2ª mão, uma pausa curta mostra a última vaza e o resultado da mão anterior.
+3. As 12 cartas saem do baralho (verso `assets/Fundo-Carta-Vermelho.png`) na ordem real: começando à direita de quem embaralhou, uma por vez, três voltas.
+4. Cada carta da própria mão aparece quando a carta voadora correspondente pousa.
+5. A vira vira de face; depois aparece o selo da manilha; então a vez é destacada.
+
+Regras da animação:
+
+- **Uma vez por mão e por aparelho** (`dealTracker`): Realtime repetido, polling, reconexão ou remontagem da tela não repetem a distribuição; remontar no meio a retoma do ponto em que estava.
+- **Entrar no meio da mão não anima** (já há carta jogada): a tela mostra o estado direto.
+- Nenhuma regra depende do fim da animação. Durante ela o app só segura os toques do próprio jogador (cerca de 1,5 s); o servidor já aceita jogadas.
+- Respeita "reduzir movimento" do aparelho (padrão do Reanimated): as cartas não voam, mas a mão e a vira aparecem normalmente.
+
+## Jogada e controles
+
+- Tocar numa carta a seleciona (sobe e ganha borda vermelha); "Jogar" ou um segundo toque confirma. Dá para pré-selecionar fora da vez.
+- Uma trava síncrona impede dois envios por toque duplo; o servidor também é idempotente pelo `clientActionId`.
+- Os botões de truco vêm de `trucoControls`, espelho de `getLegalActions`: pedir (TRUCO, SEIS, NOVE ou DOZE, conforme o valor) e, para a dupla que responde, Aceitar, Correr e Pedir o próximo valor. A dupla que pediu vê "Aguardando a outra dupla responder". Correr sem pedido pendente pede confirmação.
+- A carta jogada entra na mesa vindo do lado de quem jogou; a vencedora da vaza é destacada quando a mesa limpa.
+- Quem pediu, aceitou ou correu ganha uma fala curta ao lado do nome ("TRUCO!", "Aceito!", "Corro!") em todos os aparelhos, a partir de `lastEvent`.
 
 ## O que não fazer
 
