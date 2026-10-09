@@ -124,13 +124,13 @@ function Fixture() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.ink },
+  safe: { flex: 1, backgroundColor: colors.bg },
   bar: { paddingHorizontal: space.sm, paddingBottom: space.xs, gap: 4 },
   badge: { color: colors.gold, fontSize: font.small - 2, fontWeight: '900', textAlign: 'center', letterSpacing: 1 },
   tabs: { flexDirection: 'row', gap: 4 },
   tab: { flex: 1, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: '#FFFFFF1A', alignItems: 'center' },
   tabOn: { backgroundColor: colors.gold },
-  tabText: { color: colors.paper, fontSize: font.small - 2, fontWeight: '800' },
+  tabText: { color: colors.text, fontSize: font.small - 2, fontWeight: '800' },
   tabTextOn: { color: colors.ink },
   game: { flex: 1 },
 });

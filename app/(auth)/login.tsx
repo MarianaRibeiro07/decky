@@ -1,15 +1,16 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { signIn } from '../../src/auth/AuthProvider';
 import { validateEmail } from '../../src/auth/validators';
 import { errorMessage } from '../../src/lib/errors';
 import { Button } from '../../src/ui/Button';
 import { Logo } from '../../src/ui/Logo';
 import { Notice } from '../../src/ui/Notice';
+import { Ornament } from '../../src/ui/Ornament';
 import { Screen } from '../../src/ui/Screen';
 import { TextField } from '../../src/ui/TextField';
-import { colors, font } from '../../src/ui/theme';
+import { colors, font, fonts, space } from '../../src/ui/theme';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -39,8 +40,11 @@ export default function Login() {
 
   return (
     <Screen>
-      <Logo size={180} />
-      <Text style={styles.subtitle}>Truco Paulista sem baralho na mesa</Text>
+      <View style={styles.hero}>
+        <Logo size={180} />
+        <Text style={styles.subtitle}>Truco Paulista sem baralho na mesa</Text>
+        <Ornament width={220} />
+      </View>
       <TextField
         label="E-mail"
         value={email}
@@ -68,5 +72,6 @@ export default function Login() {
 }
 
 const styles = StyleSheet.create({
-  subtitle: { fontSize: font.body, color: colors.muted, textAlign: 'center', marginTop: -8 },
+  hero: { alignItems: 'center', gap: space.md, paddingVertical: space.sm },
+  subtitle: { fontFamily: fonts.display, fontSize: font.body + 1, color: colors.textMuted, textAlign: 'center' },
 });

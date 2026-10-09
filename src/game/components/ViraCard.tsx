@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import type { Card, Rank } from '../../contracts/types';
 import { cardLabel, PlayingCard } from '../../ui/PlayingCard';
-import { colors, font, radius } from '../../ui/theme';
+import { colors, font, radius, shadow } from '../../ui/theme';
 import { DEAL_TIMING, type DealPhase } from '../deal';
 import type { Rect } from '../geometry';
 
@@ -36,7 +36,7 @@ export function ViraCard({ rect, vira, manilhaRank, phase }: Props) {
       {phase === 'reveal' ? (
         <ViraFlip key={`${vira.rank}_${vira.suit}`} vira={vira} width={rect.w} />
       ) : (
-        <PlayingCard card={vira} faceDown={!faceUp} width={rect.w} />
+        <PlayingCard card={vira} faceDown={!faceUp} width={rect.w} elevation="table" />
       )}
     </View>
   );
@@ -78,8 +78,14 @@ interface ManilhaProps {
   large: boolean;
 }
 
-/** Selo da manilha, sobre o baralho e ao lado da vira. Aparece depois que a vira é revelada. */
+/** Selo da manilha (plaquinha escura com filete dourado), sobre o baralho e ao lado da vira. Aparece depois que a vira é revelada. */
 export function ManilhaBadge({ rect, manilhaRank, large }: ManilhaProps) {
+  const label = `★ ${rankName(manilhaRank)}`;
+  // A fonte cabe na largura do selo (a mesa encolhe em telas pequenas). `adjustsFontSizeToFit`
+  // só existe no nativo; este cálculo vale em todas as plataformas.
+  const inner = rect.w - 8;
+  const rankSize = Math.min(large ? font.large : font.small, inner / (0.62 * label.length));
+  const captionSize = Math.min(large ? 11 : 9, inner / 6.2);
   return (
     <Animated.View
       entering={FadeIn.duration(350)}
@@ -87,11 +93,11 @@ export function ManilhaBadge({ rect, manilhaRank, large }: ManilhaProps) {
       accessible
       accessibilityLabel={`Manilha: ${rankName(manilhaRank)}`}
     >
-      <Text style={[styles.manilhaCaption, large && styles.manilhaCaptionLarge]} numberOfLines={1}>
+      <Text style={[styles.manilhaCaption, { fontSize: captionSize }]} numberOfLines={1}>
         MANILHA
       </Text>
-      <Text style={[styles.manilhaRank, large && styles.manilhaRankLarge]} numberOfLines={1} adjustsFontSizeToFit>
-        ★ {rankName(manilhaRank)}
+      <Text style={[styles.manilhaRank, { fontSize: rankSize, lineHeight: rankSize + 3 }]} numberOfLines={1} adjustsFontSizeToFit>
+        {label}
       </Text>
     </Animated.View>
   );
@@ -103,13 +109,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.gold,
+    backgroundColor: '#0B0B0DF2',
     borderRadius: radius.sm,
-    borderWidth: 2,
-    borderColor: colors.ink,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    boxShadow: shadow.card,
   },
-  manilhaCaption: { color: colors.ink, fontSize: 9, fontWeight: '900' },
-  manilhaCaptionLarge: { fontSize: 11 },
-  manilhaRank: { color: colors.ink, fontSize: font.small, fontWeight: '900', lineHeight: font.small + 2 },
-  manilhaRankLarge: { fontSize: font.large, lineHeight: font.large + 2 },
+  manilhaCaption: { color: colors.gold, fontWeight: '800', letterSpacing: 0.8 },
+  manilhaRank: { color: colors.text, fontWeight: '900' },
 });

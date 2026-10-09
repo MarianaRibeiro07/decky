@@ -1,7 +1,8 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeInDown, LayoutAnimationConfig } from 'react-native-reanimated';
 import type { MatchPlayer, PublicGameState, Team } from '../../contracts/types';
-import { colors, font, radius, space, TOUCH_MIN } from '../../ui/theme';
+import { colors, font, fonts, radius, space, TOUCH_MIN } from '../../ui/theme';
 import { describeTrick, teamLabel, trucoName } from '../describe';
 
 interface Props {
@@ -27,44 +28,47 @@ export const ScoreBar = memo(function ScoreBar({ state, viewerTeam, players, lar
   const value = state.truco ? `${state.handValue} → ${trucoName(state.truco.value)}?` : `Vale ${state.handValue}`;
 
   return (
-    <View style={[styles.bar, large && styles.barLarge]}>
-      <Pressable
-        onPress={onLeave}
-        style={({ pressed }) => [styles.leave, pressed && { opacity: 0.6 }]}
-        accessibilityRole="button"
-        accessibilityLabel="Sair da mesa"
-        hitSlop={8}
-      >
-        <Text style={styles.leaveText}>✕</Text>
-      </Pressable>
+    // Ao abrir a tela, o placar aparece parado; só os pontos que mudam depois entram animados.
+    <LayoutAnimationConfig skipEntering>
+      <View style={[styles.bar, large && styles.barLarge]}>
+        <Pressable
+          onPress={onLeave}
+          style={({ pressed }) => [styles.leave, pressed && { opacity: 0.6 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Sair da mesa"
+          hitSlop={8}
+        >
+          <Text style={styles.leaveText}>✕</Text>
+        </Pressable>
 
-      <View
-        style={styles.score}
-        accessible
-        accessibilityLabel={`Placar: ${teamLabel(left, viewerTeam)} ${state.score[left]}, ${teamLabel(right, viewerTeam)} ${state.score[right]}. Partida até 12.`}
-      >
-        <TeamScore team={left} label={teamLabel(left, viewerTeam)} points={state.score[left]} names={large ? members(left) : null} large={large} />
-        <Text style={[styles.x, large && styles.xLarge]}>×</Text>
-        <TeamScore team={right} label={teamLabel(right, viewerTeam)} points={state.score[right]} names={large ? members(right) : null} large={large} />
-      </View>
+        <View
+          style={styles.score}
+          accessible
+          accessibilityLabel={`Placar: ${teamLabel(left, viewerTeam)} ${state.score[left]}, ${teamLabel(right, viewerTeam)} ${state.score[right]}. Partida até 12.`}
+        >
+          <TeamScore team={left} label={teamLabel(left, viewerTeam)} points={state.score[left]} names={large ? members(left) : null} large={large} />
+          <Text style={[styles.x, large && styles.xLarge]}>×</Text>
+          <TeamScore team={right} label={teamLabel(right, viewerTeam)} points={state.score[right]} names={large ? members(right) : null} large={large} />
+        </View>
 
-      <View
-        style={styles.hand}
-        accessible
-        accessibilityLabel={`Mão ${state.handNumber}, vale ${state.handValue}. Vazas: ${
-          state.trickResults.map((r) => describeTrick(r, viewerTeam)).join(', ') || 'nenhuma'
-        }`}
-      >
-        <Text style={[styles.value, large && styles.valueLarge, state.truco && styles.valueTruco]} numberOfLines={1}>
-          {value}
-        </Text>
-        <View style={styles.tricks}>
-          {[0, 1, 2].map((i) => (
-            <TrickDot key={i} result={state.trickResults[i]} viewerTeam={viewerTeam} large={large} />
-          ))}
+        <View
+          style={styles.hand}
+          accessible
+          accessibilityLabel={`Mão ${state.handNumber}, vale ${state.handValue}. Vazas: ${
+            state.trickResults.map((r) => describeTrick(r, viewerTeam)).join(', ') || 'nenhuma'
+          }`}
+        >
+          <Text style={[styles.value, large && styles.valueLarge, state.truco && styles.valueTruco]} numberOfLines={1}>
+            {value}
+          </Text>
+          <View style={styles.tricks}>
+            {[0, 1, 2].map((i) => (
+              <TrickDot key={i} result={state.trickResults[i]} viewerTeam={viewerTeam} large={large} />
+            ))}
+          </View>
         </View>
       </View>
-    </View>
+    </LayoutAnimationConfig>
   );
 });
 
@@ -75,7 +79,9 @@ function TeamScore({ team, label, points, names, large }: { team: Team; label: s
         <View style={[styles.teamDot, { backgroundColor: team === 'A' ? colors.teamA : colors.teamB }]} />
         <Text style={[styles.teamLabel, large && styles.teamLabelLarge]}>{label}</Text>
       </View>
-      <Text style={[styles.points, large && styles.pointsLarge]}>{points}</Text>
+      <Animated.Text key={points} entering={FadeInDown.duration(260)} style={[styles.points, large && styles.pointsLarge]}>
+        {points}
+      </Animated.Text>
       {names ? (
         <Text style={styles.names} numberOfLines={1}>
           {names}
@@ -90,7 +96,7 @@ function TrickDot({ result, viewerTeam, large }: { result: 'A' | 'B' | 'tie' | u
   let bg = 'transparent';
   let label = '';
   if (result === 'tie') {
-    bg = colors.feltText;
+    bg = colors.metal;
     label = '=';
   } else if (result) {
     bg = result === 'A' ? colors.teamA : colors.teamB;
@@ -98,39 +104,61 @@ function TrickDot({ result, viewerTeam, large }: { result: 'A' | 'B' | 'tie' | u
   }
   return (
     <View style={[styles.dot, { width: size, height: size, borderRadius: size / 2, backgroundColor: bg }]}>
-      <Text style={[styles.dotText, result === 'tie' && { color: colors.ink }, large && { fontSize: 13 }]}>{label}</Text>
+      <Text style={[styles.dotText, result && styles.dotTextOn, large && { fontSize: 13 }]}>{label}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.xs },
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.xs,
+    paddingHorizontal: space.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
   barLarge: { paddingVertical: space.sm },
   leave: {
     width: TOUCH_MIN,
     height: TOUCH_MIN,
-    borderRadius: radius.md,
-    backgroundColor: '#00000040',
+    borderRadius: TOUCH_MIN / 2,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  leaveText: { color: colors.paper, fontSize: font.large, fontWeight: '800' },
-  score: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.sm },
+  leaveText: { color: colors.textMuted, fontSize: font.body, fontWeight: '700' },
+  score: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.md },
   team: { alignItems: 'center', minWidth: 56 },
-  teamHead: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  teamDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1, borderColor: colors.paper },
-  teamLabel: { color: colors.feltText, fontSize: font.small - 1, fontWeight: '800' },
-  teamLabelLarge: { fontSize: font.body },
-  points: { color: colors.paper, fontSize: 30, fontWeight: '900', lineHeight: 34 },
-  pointsLarge: { fontSize: 56, lineHeight: 62 },
-  names: { color: colors.feltText, fontSize: font.small - 2, maxWidth: 130 },
-  x: { color: colors.feltText, fontSize: font.large },
+  teamHead: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  teamDot: { width: 8, height: 8, borderRadius: 4 },
+  teamLabel: { color: colors.textMuted, fontSize: font.small - 2, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },
+  teamLabelLarge: { fontSize: font.small },
+  points: { fontFamily: fonts.displayHeavy, fontVariant: ['lining-nums'], color: colors.text, fontSize: 32, lineHeight: 40 },
+  pointsLarge: { fontSize: 56, lineHeight: 68 },
+  names: { color: colors.textFaint, fontSize: font.small - 2, maxWidth: 130 },
+  x: { fontFamily: fonts.display, color: colors.metalDark, fontSize: font.large },
   xLarge: { fontSize: font.title },
-  hand: { alignItems: 'flex-end', gap: 4, minWidth: 84 },
-  value: { color: colors.gold, fontSize: font.body, fontWeight: '900' },
-  valueLarge: { fontSize: font.title },
-  valueTruco: { color: colors.paper },
+  hand: { alignItems: 'flex-end', gap: 5, minWidth: 84 },
+  value: {
+    color: colors.goldSoft,
+    fontSize: font.small,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    borderWidth: 1,
+    borderColor: colors.goldDeep,
+    borderRadius: radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    overflow: 'hidden',
+  },
+  valueLarge: { fontSize: font.large, paddingHorizontal: 12 },
+  valueTruco: { color: colors.cream, backgroundColor: colors.redDeep, borderColor: colors.red },
   tricks: { flexDirection: 'row', gap: 4 },
-  dot: { borderWidth: 2, borderColor: colors.feltText, alignItems: 'center', justifyContent: 'center' },
-  dotText: { color: colors.paper, fontSize: 10, fontWeight: '900' },
+  dot: { borderWidth: 1.5, borderColor: colors.metalDark, alignItems: 'center', justifyContent: 'center' },
+  dotText: { color: colors.text, fontSize: 10, fontWeight: '900' },
+  dotTextOn: { color: colors.ink },
 });

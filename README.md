@@ -32,7 +32,7 @@ Projeto da atividade de Desenvolvimento Mobile/Scrum do SENAI. Apresentação pr
 
 ## Stack
 
-React Native, Expo, TypeScript e Expo Router no cliente. Supabase (Auth, PostgreSQL, Realtime, Edge Functions e/ou RPC) no servidor. O servidor é a fonte única da verdade; o cliente só envia intenções de jogada.
+React Native, Expo, TypeScript e Expo Router no cliente, com `react-native-svg` para a mesa e Playfair Display (`@expo-google-fonts/playfair-display`) nos títulos. A identidade visual (cassino escuro, logo preservado) está descrita em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#identidade-visual). Supabase (Auth, PostgreSQL, Realtime, Edge Functions e/ou RPC) no servidor. O servidor é a fonte única da verdade; o cliente só envia intenções de jogada.
 
 ## Pré-requisitos
 

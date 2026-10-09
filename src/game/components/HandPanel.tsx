@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOutUp, LayoutAnimationConfig, LinearTransition } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  FadeOutUp,
+  LayoutAnimationConfig,
+  LinearTransition,
+  useAnimatedStyle,
+  withSpring,
+} from 'react-native-reanimated';
 import type { LegalActions } from '../../../supabase/functions/_shared/engine/game.ts';
 import type { Card, GameAction, PrivateHand, PublicGameState, Seat } from '../../contracts/types';
 import { useRerenderAt } from '../../lib/useRerenderAt';
@@ -108,13 +116,14 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
                 exiting={FadeOutUp.duration(220)}
                 layout={LinearTransition.duration(200)}
               >
-                <View style={[styles.slot, isSelected && styles.slotSelected]}>
+                <LiftOnSelect selected={isSelected}>
                   <PlayingCard
                     card={card}
                     width={cardW}
                     selected={isSelected}
                     highlighted={manilha && !isSelected}
                     dimmed={busy === `card-${key}`}
+                    elevation={isSelected ? 'lifted' : 'table'}
                     disabled={dealing || !!busy}
                     onPress={() => tapCard(card)}
                     hint={
@@ -126,7 +135,7 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
                     }
                   />
                   <Text style={[styles.cardTag, manilha && styles.cardTagManilha]}>{manilha ? '★ manilha' : ' '}</Text>
-                </View>
+                </LiftOnSelect>
               </Animated.View>
             );
           })}
@@ -189,25 +198,39 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
   );
 }
 
+/**
+ * A carta escolhida sobe com uma mola curta. A animação fica numa view interna: o invólucro de fora
+ * tem a animação de layout (entrada, saída e reordenação), que é dona do `transform` dela.
+ */
+function LiftOnSelect({ selected, children }: { selected: boolean; children: ReactNode }) {
+  const lift = useAnimatedStyle(() => ({
+    transform: [{ translateY: withSpring(selected ? -16 : 0, { damping: 16, stiffness: 260 }) }],
+  }));
+  return <Animated.View style={[styles.slot, lift]}>{children}</Animated.View>;
+}
+
 const styles = StyleSheet.create({
+  // Bandeja de couro na frente do jogador: grafite, filete metálico em cima e luz vindo da mesa.
   panel: {
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surface,
     paddingHorizontal: space.md,
     paddingTop: space.sm,
     gap: space.sm,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
+    borderTopWidth: 1,
+    borderColor: colors.lineStrong,
+    boxShadow: '0px -8px 18px rgba(0, 0, 0, 0.55)',
   },
-  hand: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', gap: space.sm, paddingTop: 14 },
+  hand: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', gap: space.sm, paddingTop: 18 },
   slot: { alignItems: 'center' },
-  slotSelected: { transform: [{ translateY: -14 }] },
-  cardTag: { fontSize: font.small - 2, color: colors.ink, fontWeight: '700', marginTop: 2 },
-  cardTagManilha: { color: colors.redDark },
-  empty: { fontSize: font.body, color: colors.muted, alignSelf: 'center', textAlign: 'center' },
+  cardTag: { fontSize: font.small - 2, color: colors.textFaint, fontWeight: '700', marginTop: 4 },
+  cardTagManilha: { color: colors.gold },
+  empty: { fontSize: font.body, color: colors.textMuted, alignSelf: 'center', textAlign: 'center' },
   row: { flexDirection: 'row', gap: space.sm },
   grow: { flex: 1 },
   play: { flex: 1.3 },
-  waiting: { fontSize: font.body, color: colors.ink, fontWeight: '700', textAlign: 'center', paddingVertical: space.sm },
+  waiting: { fontSize: font.body, color: colors.goldSoft, fontWeight: '700', textAlign: 'center', paddingVertical: space.sm },
   confirm: { gap: space.sm },
-  confirmText: { fontSize: font.body - 1, color: colors.ink, fontWeight: '700', textAlign: 'center' },
+  confirmText: { fontSize: font.body - 1, color: colors.text, fontWeight: '700', textAlign: 'center' },
 });

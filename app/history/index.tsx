@@ -7,8 +7,9 @@ import { deleteNote, fetchMyMatches, listNotes } from '../../src/history/api';
 import { errorMessage } from '../../src/lib/errors';
 import { Button } from '../../src/ui/Button';
 import { Notice } from '../../src/ui/Notice';
+import { Panel } from '../../src/ui/Panel';
 import { Screen } from '../../src/ui/Screen';
-import { colors, font, radius, space } from '../../src/ui/theme';
+import { colors, font, fonts, space } from '../../src/ui/theme';
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -64,7 +65,7 @@ export default function History() {
   const matchById = new Map(matches.map((m) => [m.id, m]));
 
   return (
-    <Screen title="Histórico">
+    <Screen title="Histórico" subtitle="Suas partidas e as notas que você escreveu.">
       <Notice kind="error" message={error} />
       <Notice kind="success" message={info} />
 
@@ -77,7 +78,7 @@ export default function History() {
       {notes.map((note) => {
         const match = matchById.get(note.matchId);
         return (
-          <View key={note.id} style={styles.card}>
+          <Panel key={note.id}>
             <Text style={styles.cardTitle}>{note.title}</Text>
             {note.notes ? <Text style={styles.cardBody}>{note.notes}</Text> : null}
             <Text style={styles.meta}>
@@ -87,12 +88,13 @@ export default function History() {
               <Button
                 label="Editar"
                 variant="dark"
+                size="compact"
                 style={styles.flex}
                 onPress={() => router.push({ pathname: '/history/note', params: { id: note.id } })}
               />
-              <Button label="Excluir" variant="secondary" style={styles.flex} onPress={() => confirmDelete(note)} />
+              <Button label="Excluir" variant="secondary" size="compact" style={styles.flex} onPress={() => confirmDelete(note)} />
             </View>
-          </View>
+          </Panel>
         );
       })}
 
@@ -106,10 +108,10 @@ export default function History() {
         const result =
           match.status === 'playing' ? 'Em andamento' : match.winnerTeam === match.myTeam ? 'Vitória' : 'Derrota';
         return (
-          <View key={match.id} style={styles.card}>
+          <Panel key={match.id} tone={result === 'Vitória' ? 'accent' : 'default'}>
             <View style={styles.rowBetween}>
-              <Text style={[styles.cardTitle, result === 'Vitória' && { color: colors.success }]}>{result}</Text>
-              <Text style={styles.cardTitle}>
+              <Text style={[styles.cardTitle, result === 'Vitória' && styles.win]}>{result}</Text>
+              <Text style={styles.score}>
                 Nós {mine} × {theirs} Eles
               </Text>
             </View>
@@ -117,24 +119,26 @@ export default function History() {
             <Button
               label="Nova nota"
               variant="secondary"
+              size="compact"
               onPress={() => router.push({ pathname: '/history/note', params: { matchId: match.id } })}
             />
-          </View>
+          </Panel>
         );
       })}
 
-      <Button label="Voltar" variant="secondary" onPress={() => router.back()} />
+      <Button label="Voltar" variant="ghost" onPress={() => router.back()} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  section: { fontSize: font.large, fontWeight: '800', color: colors.ink, marginTop: space.sm },
-  empty: { fontSize: font.body, color: colors.muted },
-  card: { backgroundColor: colors.paper, borderRadius: radius.md, borderWidth: 2, borderColor: colors.border, padding: space.md, gap: space.sm },
-  cardTitle: { fontSize: font.large, fontWeight: '800', color: colors.ink },
-  cardBody: { fontSize: font.body, color: colors.ink },
-  meta: { fontSize: font.small, color: colors.muted },
+  section: { fontFamily: fonts.display, fontSize: font.large, lineHeight: 30, color: colors.text, marginTop: space.sm },
+  empty: { fontSize: font.body - 1, color: colors.textMuted },
+  cardTitle: { fontSize: font.large - 2, fontWeight: '800', color: colors.text },
+  win: { color: colors.goldSoft },
+  score: { fontFamily: fonts.display, fontVariant: ['lining-nums'], fontSize: font.large - 2, color: colors.text },
+  cardBody: { fontSize: font.body - 1, lineHeight: 24, color: colors.text },
+  meta: { fontSize: font.small - 1, color: colors.textFaint },
   row: { flexDirection: 'row', gap: space.sm },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: space.sm },
   flex: { flex: 1 },

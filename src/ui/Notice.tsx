@@ -21,12 +21,12 @@ export function Notice({ kind, message }: { kind: Kind; message: string | null |
 }
 
 const KINDS: Record<Kind, { bg: string; border: string; text: string; icon: string }> = {
-  error: { bg: colors.errorBg, border: colors.red, text: colors.redDark, icon: '⚠' },
-  success: { bg: colors.successBg, border: colors.success, text: colors.success, icon: '✓' },
-  info: { bg: colors.infoBg, border: colors.border, text: colors.ink, icon: 'ℹ' },
+  error: { bg: colors.errorBg, border: '#7A1427', text: colors.redText, icon: '⚠' },
+  success: { bg: colors.successBg, border: '#24573A', text: colors.success, icon: '✓' },
+  info: { bg: colors.infoBg, border: colors.lineStrong, text: colors.text, icon: 'ℹ' },
 };
 
 const styles = StyleSheet.create({
-  box: { borderWidth: 2, borderRadius: radius.md, padding: space.md },
-  text: { fontSize: font.body, fontWeight: '600' },
+  box: { borderWidth: 1, borderLeftWidth: 4, borderRadius: radius.md, paddingVertical: space.sm + 4, paddingHorizontal: space.md },
+  text: { fontSize: font.body - 1, fontWeight: '600', lineHeight: 24 },
 });

@@ -71,7 +71,7 @@ export default function NoteForm() {
   if (loading) {
     return (
       <Screen title="Nota">
-        <ActivityIndicator size="large" color={colors.red} />
+        <ActivityIndicator size="large" color={colors.gold} />
       </Screen>
     );
   }
@@ -91,7 +91,7 @@ export default function NoteForm() {
       <Notice kind="error" message={error} />
       <Button label="Salvar" onPress={save} loading={saving} disabled={!editing && !matchId} />
       {editing ? <Button label="Excluir nota" variant="secondary" onPress={confirmDelete} /> : null}
-      <Button label="Cancelar" variant="secondary" onPress={() => router.back()} />
+      <Button label="Cancelar" variant="ghost" onPress={() => router.back()} />
     </Screen>
   );
 }

@@ -57,7 +57,7 @@ export default function Register() {
   }
 
   return (
-    <Screen title="Criar conta">
+    <Screen title="Criar conta" subtitle="Seu nome aparece na mesa para os outros jogadores.">
       <TextField label="Seu nome na mesa" value={values.name} onChangeText={set('name')} error={errors.name} placeholder="Ex.: Caio" maxLength={20} />
       <TextField
         label="E-mail"
