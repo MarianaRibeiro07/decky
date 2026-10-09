@@ -87,12 +87,39 @@ Cada história tem seus critérios em [PRODUCT_BACKLOG.md](PRODUCT_BACKLOG.md). 
 - [ ] Sair da partida e voltar logo em seguida (pela sala) não mostra erro de canal ("cannot add postgres_changes callbacks").
 - [ ] Tocar numa carta a seleciona; "Jogar" confirma; a carta sai da mão e aparece na posição de quem jogou nos outros aparelhos.
 - [ ] Toque duplo rápido em "Jogar" envia uma jogada só.
+- [ ] Sem carta escolhida, o botão diz "Escolha a carta" e não envia nada; fora da vez, "Aguarde a vez".
+- [ ] "Correr" pede confirmação ("Continuar jogando" ou "Correr") e, confirmado, dá os pontos à outra dupla.
 - [ ] Pedido de truco: a dupla adversária vê Aceitar, Correr e Pedir SEIS; o parceiro de quem pediu só aguarda; a mesa mostra o pedido.
 - [ ] Pedidos de TRUCO, SEIS, NOVE e DOZE aparecem no centro da mesa como plaquinha vermelha com o valor e a escada da aposta, entrando do lado de quem pediu, e somem sozinhos em cerca de 2,5 s sem deixar resto.
 - [ ] Aceitar mostra o selo dourado "ACEITO!" com o novo valor (só depois da confirmação) e o placar troca para "Vale N".
 - [ ] Pedido e aceite em sequência rápida aparecem na ordem, um de cada vez; nenhum aviso aparece duas vezes.
 - [ ] Reabrir o app ou voltar do segundo plano durante um pedido não reapresenta o aviso; o banner continua mostrando o pedido pendente.
 - [ ] Com truco pendente, nenhum lugar fica destacado como "a vez".
+
+### Manilha na mão
+
+- [ ] Nenhuma carta mostra "manilha" escrito embaixo; as manilhas têm contorno dourado e selo com estrela.
+- [ ] Antes de a vira abrir, nenhuma carta da mão é destacada.
+- [ ] Mão com 1 manilha: brilho dourado, estrela central, pico e dissipação; fica o destaque.
+- [ ] Mão com 2 e 3 manilhas: revelações uma depois da outra, da esquerda para a direita, valores legíveis.
+- [ ] Mão sem manilha: nenhum efeito.
+- [ ] Selecionar e jogar uma manilha durante a revelação funciona normalmente.
+- [ ] Sair da partida e voltar, ou perder a conexão e voltar, não repete a revelação.
+- [ ] A mesa central nunca mostra destaque de manilha em carta de mão (ela não tem mão).
+- [ ] Com "reduzir movimento" ligado no aparelho, não há revelação, só o destaque.
+
+### iOS
+
+Verificado sem Mac (Windows): `expo install --check` sem pendências; `expo-doctor` 21/21; `expo export --platform ios` gera o bundle Hermes; `expo config --type introspect` gera o Info.plist com `UIUserInterfaceStyle Dark`, `UIRequiresFullScreen` e `ITSAppUsesNonExemptEncryption false`; typecheck e testes. Layout e animações conferidos no navegador (react-native-web) em 375 x 812.
+
+Ainda precisa de iPhone ou simulador:
+
+- [ ] Abrir pelo Expo Go num iPhone com notch e num com Dynamic Island: placar abaixo da barra de status, mão e botões acima da barra de gestos.
+- [ ] iPhone SE (375 x 667): três botões de ação numa linha, cartas inteiras, selo da manilha visível.
+- [ ] Login e cadastro: o teclado não cobre o campo; arrastar para baixo recolhe o teclado; e-mail sem correção automática; a sugestão de senha forte preenche os dois campos.
+- [ ] Alertas ("Sair da mesa?") em tema escuro.
+- [ ] Na partida, o gesto de voltar (deslizar da borda) não tira o jogador da mesa.
+- [ ] Revelação da manilha fluida (sem travar a distribuição) e halos dourados visíveis (`boxShadow`).
 
 ### Layout da mesa e da sala
 

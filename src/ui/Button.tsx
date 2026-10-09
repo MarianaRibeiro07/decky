@@ -1,4 +1,5 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Icon, type IconName } from './icons';
 import { colors, font, radius, shadow, space, TOUCH_MIN } from './theme';
 
 /**
@@ -22,10 +23,15 @@ interface Props {
   hint?: string;
   /** 'compact' para fileiras de ações lado a lado (mantém o alvo de toque mínimo). */
   size?: 'normal' | 'compact';
+  /**
+   * Ícone da ação. No 'compact' fica em cima do rótulo: cabe em três botões lado a lado
+   * mesmo no iPhone SE, sem quebrar palavra. No 'normal', à esquerda.
+   */
+  icon?: IconName;
   style?: StyleProp<ViewStyle>;
 }
 
-export function Button({ label, onPress, variant = 'primary', disabled, loading, caption, hint, size = 'normal', style }: Props) {
+export function Button({ label, onPress, variant = 'primary', disabled, loading, caption, hint, size = 'normal', icon, style }: Props) {
   const inactive = disabled || loading;
   const palette = VARIANTS[variant];
   const compact = size === 'compact';
@@ -40,6 +46,7 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading,
       style={({ pressed }) => [
         styles.base,
         compact && styles.compact,
+        compact && icon && styles.compactIcon,
         { backgroundColor: palette.bg, borderColor: palette.border },
         palette.raised && !inactive && styles.raised,
         pressed && { backgroundColor: palette.pressed, transform: [{ scale: 0.98 }] },
@@ -50,11 +57,14 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading,
       {loading ? (
         <ActivityIndicator color={palette.text} />
       ) : (
-        <View style={styles.texts}>
+        <View style={[styles.texts, icon && !compact && styles.inline]}>
+          {icon ? <Icon name={icon} size={compact ? 18 : 20} color={palette.text} /> : null}
           <Text
-            style={[styles.label, compact && styles.labelCompact, { color: palette.text }]}
+            style={[styles.label, compact && styles.labelCompact, compact && icon && styles.labelIcon, { color: palette.text }]}
             maxFontSizeMultiplier={compact ? 1.3 : 1.6}
-            numberOfLines={compact ? 2 : undefined}
+            numberOfLines={compact ? (icon ? 1 : 2) : undefined}
+            adjustsFontSizeToFit={compact && !!icon}
+            minimumFontScale={0.8}
           >
             {label}
           </Text>
@@ -90,8 +100,14 @@ const styles = StyleSheet.create({
   raised: { boxShadow: shadow.button },
   compact: { minHeight: TOUCH_MIN + 4, paddingHorizontal: space.sm, paddingVertical: space.xs },
   texts: { alignItems: 'center', gap: 2 },
+  inline: { flexDirection: 'row', gap: space.sm },
   label: { fontSize: font.body + 1, fontWeight: '700', letterSpacing: 0.3, textAlign: 'center' },
   labelCompact: { fontSize: font.body - 1, fontWeight: '800', letterSpacing: 0 },
+  // Com ícone em cima: rótulo um pouco menor e menos recuo, para "Pedir TRUCO" e "Escolha a carta"
+  // caberem numa linha nos três botões lado a lado de um iPhone SE (375 pt).
+  compactIcon: { paddingHorizontal: space.xs + 2 },
+  labelIcon: { fontSize: font.body - 3 },
   caption: { fontSize: font.small - 2, textAlign: 'center' },
-  disabled: { opacity: 0.42 },
+  // 0,5 mantém o rótulo legível (contraste ~4,5:1 sobre o painel): o botão parado também informa.
+  disabled: { opacity: 0.5 },
 });

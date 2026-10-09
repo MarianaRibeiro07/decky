@@ -37,7 +37,12 @@ export function Screen({ title, subtitle, children, scroll = true }: Props) {
       <SafeAreaView style={styles.flex}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           {scroll ? (
-            <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+            <ScrollView
+              contentContainerStyle={styles.scroll}
+              keyboardShouldPersistTaps="handled"
+              // iOS: arrastar a tela para baixo recolhe o teclado acompanhando o dedo, como nos apps nativos.
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            >
               {body}
             </ScrollView>
           ) : (

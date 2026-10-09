@@ -3,7 +3,7 @@ import { Image, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-nat
 import Animated, { FadeInDown, FadeInLeft, FadeInRight, FadeInUp, FadeOut, LayoutAnimationConfig, ZoomIn } from 'react-native-reanimated';
 import { resolveTrick } from '../../../supabase/functions/_shared/engine/strength.ts';
 import type { MatchPlayer, PublicGameState, Seat, TableCard } from '../../contracts/types';
-import { CARD_BACK, PlayingCard } from '../../ui/PlayingCard';
+import { CARD_BACK, cardRadius, PlayingCard } from '../../ui/PlayingCard';
 import { surfaceMetrics } from '../../ui/shapes';
 import { TableSurface } from '../../ui/TableSurface';
 import { colors, font, radius, shadow } from '../../ui/theme';
@@ -195,12 +195,16 @@ function Board({
 /** Baralho fechado no centro da mesa, com o verso do Decky: um maço com espessura e sombra no feltro. */
 function DeckStack({ rect }: { rect: Rect }) {
   return (
-    <View style={[styles.abs, styles.deck, { left: rect.x, top: rect.y, width: rect.w, height: rect.h }]} accessible accessibilityLabel="Baralho">
+    <View
+      style={[styles.abs, styles.deck, { left: rect.x, top: rect.y, width: rect.w, height: rect.h, borderRadius: cardRadius(rect.w) }]}
+      accessible
+      accessibilityLabel="Baralho"
+    >
       {[4, 2, 0].map((offset) => (
         <Image
           key={offset}
           source={CARD_BACK}
-          style={[styles.deckCard, { left: -offset / 2, top: -offset, width: rect.w, height: rect.h }]}
+          style={[styles.deckCard, { left: -offset / 2, top: -offset, width: rect.w, height: rect.h, borderRadius: cardRadius(rect.w) }]}
         />
       ))}
     </View>
@@ -266,8 +270,8 @@ function Bubble({ rect, side, text, large }: { rect: Rect; side: Side; text: str
 const styles = StyleSheet.create({
   area: { flex: 1 },
   abs: { position: 'absolute' },
-  deckCard: { position: 'absolute', borderRadius: radius.sm, borderWidth: 1, borderColor: '#00000088' },
-  deck: { borderRadius: radius.sm, boxShadow: shadow.card },
+  deckCard: { position: 'absolute', borderWidth: 1, borderColor: '#00000088' },
+  deck: { boxShadow: shadow.card },
   emptySlot: { borderRadius: radius.sm, borderWidth: 1, borderColor: '#FFFFFF1F', backgroundColor: '#00000014' },
   emptySlotTurn: { borderColor: colors.gold, borderWidth: 2, boxShadow: shadow.turn },
   winnerTag: {

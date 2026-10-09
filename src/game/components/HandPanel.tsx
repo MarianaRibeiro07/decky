@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, {
   FadeIn,
@@ -10,18 +10,28 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import type { LegalActions } from '../../../supabase/functions/_shared/engine/game.ts';
-import type { Card, GameAction, PrivateHand, PublicGameState, Seat } from '../../contracts/types';
+import type { Card, GameAction, PrivateHand, PublicGameState, Rank, Seat } from '../../contracts/types';
 import { useRerenderAt } from '../../lib/useRerenderAt';
 import { Button } from '../../ui/Button';
+import type { IconName } from '../../ui/icons';
 import { Notice } from '../../ui/Notice';
-import { cardLabel, PlayingCard } from '../../ui/PlayingCard';
+import { CARD_RATIO, cardLabel, PlayingCard, sealSize } from '../../ui/PlayingCard';
 import { colors, font, radius, space } from '../../ui/theme';
-import { trucoControls, type Control } from '../controls';
-import { arrivedCards, landingMoments } from '../deal';
+import { trucoControls, type Control, type ControlId } from '../controls';
+import { arrivedCards, landingMoments, type DealRun } from '../deal';
+import { cardKey as keyOf, manilhaReveals, revealMoments, revealProgress, showsManilha, type ManilhaReveal as Reveal } from '../manilha';
 import type { DealAnimation } from '../useDealAnimation';
+import { ManilhaReveal } from './ManilhaReveal';
 
-const keyOf = (card: Card) => `${card.rank}_${card.suit}`;
 const NO_MOMENTS: number[] = [];
+
+const CONTROL_ICONS: Record<ControlId, IconName> = {
+  request: 'raise',
+  raise: 'raise',
+  accept: 'accept',
+  refuse: 'fold',
+  fold: 'fold',
+};
 
 /**
  * Quantas cartas da própria mão já "chegaram" na distribuição animada. Calculado no render
@@ -31,6 +41,22 @@ function useArrivedCards(deal: DealAnimation, dealing: boolean, dealerSeat: Seat
   const run = dealing ? deal.run : null;
   useRerenderAt(run ? landingMoments(run, dealerSeat, mySeat) : NO_MOMENTS);
   return arrivedCards(run, dealerSeat, mySeat, Date.now());
+}
+
+/**
+ * Plano das revelações de manilha desta distribuição. Fica fixo depois de feito com a mão recebida:
+ * jogar uma manilha no meio da sequência não reescalona as outras (não corta nem repete efeito).
+ * Só é refeito quando muda a distribuição ou a vira, ou quando a mão chega depois do estado novo.
+ */
+function useManilhaReveals(run: DealRun | null, cards: Card[], manilhaRank: Rank): Reveal[] {
+  const plan = useRef<{ run: DealRun | null; rank: Rank; dealt: number; reveals: Reveal[] } | null>(null);
+  const current = plan.current;
+  if (!current || current.run !== run || current.rank !== manilhaRank || (current.dealt === 0 && cards.length > 0)) {
+    plan.current = { run, rank: manilhaRank, dealt: cards.length, reveals: manilhaReveals(run, cards, manilhaRank) };
+  }
+  const reveals = plan.current!.reveals;
+  useRerenderAt(reveals.length > 0 ? revealMoments(reveals) : NO_MOMENTS);
+  return reveals;
 }
 
 interface Props {
@@ -53,6 +79,10 @@ interface Props {
  * Metade de baixo da tela do jogador: as três cartas privadas e os controles.
  * Fluxo da carta: tocar seleciona (a carta sobe e ganha borda), confirmar envia ao servidor.
  * Tocar de novo na carta selecionada também confirma.
+ *
+ * Manilhas: contorno, halo e selo com estrela na própria carta, calculados com a mão privada (que só
+ * este aparelho recebe) e a manilha pública. Ao receber a mão, cada manilha ganha uma revelação
+ * especial depois que a vira abre; ela não bloqueia a jogada e não se repete (ver `manilhaReveals`).
  */
 export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct, bottomInset, size = 'normal' }: Props) {
   const { width, height } = useWindowDimensions();
@@ -78,6 +108,8 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
 
   const large = size === 'large';
   const cardW = Math.min(large ? 150 : 112, (width - space.md * 2 - space.sm * 2) / 3, height * (large ? 0.21 : 0.13));
+  const reveals = useManilhaReveals(deal.run, cards, state.manilhaRank);
+  const now = Date.now();
 
   function tapCard(card: Card) {
     if (dealing || busy) return;
@@ -102,11 +134,17 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
 
       {/* Abrir a tela ou reconectar não refaz a entrada das cartas que já estavam na mão. */}
       <LayoutAnimationConfig skipEntering>
-        <View style={[styles.hand, { minHeight: cardW * 1.452 + 30 }]} accessibilityLabel="Suas cartas">
+        <View
+          // Em cima, espaço para a carta escolhida subir e para o selo da manilha, que sai do canto.
+          style={[styles.hand, { minHeight: cardW * CARD_RATIO + space.xs, paddingTop: Math.max(18, sealSize(cardW) * 0.34 + 12) }]}
+          accessibilityLabel="Suas cartas"
+        >
           {cards.slice(0, arrived).map((card) => {
             const key = keyOf(card);
             const isSelected = key === selected;
-            const manilha = card.rank === state.manilhaRank;
+            const reveal = reveals.find((r) => r.key === key);
+            const manilha = showsManilha(card, state.manilhaRank, deal.phase, reveal, now);
+            const revealing = revealProgress(reveal, now);
             return (
               // A animação de layout fica no invólucro; o deslocamento da seleção vai na view de dentro,
               // para o Reanimated não sobrescrever o `transform` (aviso "may be overwritten by a layout animation").
@@ -121,7 +159,8 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
                     card={card}
                     width={cardW}
                     selected={isSelected}
-                    highlighted={manilha && !isSelected}
+                    ready={canPlay}
+                    manilha={manilha}
                     dimmed={busy === `card-${key}`}
                     elevation={isSelected ? 'lifted' : 'table'}
                     disabled={dealing || !!busy}
@@ -134,7 +173,7 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
                         : 'Toque para selecionar'
                     }
                   />
-                  <Text style={[styles.cardTag, manilha && styles.cardTagManilha]}>{manilha ? '★ manilha' : ' '}</Text>
+                  {revealing !== null ? <ManilhaReveal cardWidth={cardW} from={revealing} /> : null}
                 </LiftOnSelect>
               </Animated.View>
             );
@@ -152,9 +191,11 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
             ponto(s) e começa outra mão.
           </Text>
           <View style={styles.row}>
-            <Button label="Continuar" variant="secondary" size="compact" style={styles.grow} onPress={() => setConfirmFold(false)} />
+            <Button label="Continuar jogando" variant="secondary" size="compact" style={styles.grow} onPress={() => setConfirmFold(false)} />
             <Button
-              label="Sim, correr"
+              label="Correr"
+              hint="Confirma: desiste da mão"
+              icon="fold"
               variant="primary"
               size="compact"
               style={styles.grow}
@@ -170,17 +211,24 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
       ) : mode === 'respond' ? (
         <View style={styles.row} accessibilityLabel="Responder ao pedido de truco">
           {controls.map((c) => (
-            <Button key={c.id} label={c.label} hint={c.hint} variant={c.variant} size="compact" style={styles.grow}
+            <Button key={c.id} label={c.label} hint={c.hint} icon={CONTROL_ICONS[c.id]} variant={c.variant} size="compact" style={styles.grow}
               loading={busy === c.id} disabled={!!busy} onPress={() => press(c)} />
           ))}
         </View>
       ) : mode === 'waiting_answer' ? (
         <Text style={styles.waiting}>Pedido feito. Aguardando a outra dupla responder…</Text>
       ) : mode === 'play' ? (
+        // Correr à esquerda, longe do polegar; jogar à direita, maior e preenchido: é a ação principal.
         <View style={styles.row}>
+          {[...controls].reverse().map((c) => (
+            <Button key={c.id} label={c.label} hint={c.hint} icon={CONTROL_ICONS[c.id]} variant={c.variant} size="compact"
+              style={c.id === 'fold' ? styles.fold : styles.truco}
+              loading={busy === c.id} disabled={!!busy || dealing} onPress={() => press(c)} />
+          ))}
           <Button
-            label={legal.playCard ? 'Jogar' : 'Aguarde a vez'}
-            hint={selectedCard ? `Joga ${cardLabel(selectedCard)} na mesa` : 'Selecione uma carta primeiro'}
+            label={playLabel(dealing, legal.playCard, selectedCard)}
+            hint={selectedCard ? `Joga ${cardLabel(selectedCard)} na mesa` : 'Toque numa carta da mão para escolher'}
+            icon="play"
             variant="primary"
             size="compact"
             style={styles.play}
@@ -188,14 +236,18 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
             loading={!!selectedCard && busy === `card-${keyOf(selectedCard)}`}
             onPress={() => selectedCard && onAct(`card-${keyOf(selectedCard)}`, { type: 'play_card', card: selectedCard })}
           />
-          {controls.map((c) => (
-            <Button key={c.id} label={c.label} hint={c.hint} variant={c.variant} size="compact" style={styles.grow}
-              loading={busy === c.id} disabled={!!busy || dealing} onPress={() => press(c)} />
-          ))}
         </View>
       ) : null}
     </View>
   );
+}
+
+/** O rótulo do botão de jogar diz por que ele está parado, em vez de só ficar apagado. */
+function playLabel(dealing: boolean, myTurn: boolean, selected: Card | null): string {
+  if (dealing) return 'Distribuindo…';
+  if (!myTurn) return 'Aguarde a vez';
+  if (!selected) return 'Escolha a carta';
+  return 'Jogar';
 }
 
 /**
@@ -222,14 +274,14 @@ const styles = StyleSheet.create({
     borderColor: colors.lineStrong,
     boxShadow: '0px -8px 18px rgba(0, 0, 0, 0.55)',
   },
-  hand: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', gap: space.sm, paddingTop: 18 },
+  hand: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', gap: space.sm },
   slot: { alignItems: 'center' },
-  cardTag: { fontSize: font.small - 2, color: colors.textFaint, fontWeight: '700', marginTop: 4 },
-  cardTagManilha: { color: colors.gold },
   empty: { fontSize: font.body, color: colors.textMuted, alignSelf: 'center', textAlign: 'center' },
   row: { flexDirection: 'row', gap: space.sm },
   grow: { flex: 1 },
-  play: { flex: 1.3 },
+  truco: { flex: 1.1 },
+  fold: { flex: 0.8 },
+  play: { flex: 1.4 },
   waiting: { fontSize: font.body, color: colors.goldSoft, fontWeight: '700', textAlign: 'center', paddingVertical: space.sm },
   confirm: { gap: space.sm },
   confirmText: { fontSize: font.body - 1, color: colors.text, fontWeight: '700', textAlign: 'center' },

@@ -30,6 +30,11 @@ export const colors = {
   gold: '#C9A45C',
   goldSoft: '#E3CC98',
   goldDeep: '#6E5630',
+  /** Ouro aceso: só no destaque da manilha e na revelação dela. */
+  goldBright: '#EBC66E',
+  goldLight: '#FFF1C2',
+  /** Papel marfim das cartas (o mesmo tom aplicado às imagens por scripts/build_cards.py). */
+  paper: '#FCF8EF',
 
   // Mesa: feltro carvão, couro preto.
   felt: '#303236',
@@ -88,6 +93,10 @@ export const shadow = {
   panel: '0px 10px 24px rgba(0, 0, 0, 0.55)',
   button: 'inset 0px 1px 0px rgba(255, 255, 255, 0.16), 0px 4px 10px rgba(0, 0, 0, 0.45)',
   turn: '0px 0px 12px rgba(201, 164, 92, 0.45)',
+  /** Halo dourado discreto e permanente da manilha na mão. */
+  manilha: '0px 0px 10px rgba(235, 198, 110, 0.55)',
+  /** Carta escolhida e pronta para jogar. */
+  ready: '0px 0px 12px rgba(200, 16, 46, 0.55)',
 };
 
 /** Alvo mínimo de toque recomendado (44 x 44 pt); usamos mais nos botões principais. */
