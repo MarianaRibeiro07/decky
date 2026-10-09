@@ -15,6 +15,7 @@ Projeto da atividade de Desenvolvimento Mobile/Scrum do SENAI. Apresentação pr
 - Tela do jogador dividida: mesa pública em cima, mão privada embaixo, com seleção e confirmação da carta e controles de truco contextuais.
 - Mesa central (modo mesa): só informações públicas, em tela cheia, sem mão e sem poder jogar (garantido pelo servidor). Nesse modo os 4 celulares dos jogadores mostram só a própria mão, os controles e o essencial público; a mesa completa fica no aparelho da mesa.
 - Distribuição animada: as cartas saem do baralho até cada jogador, a vira é revelada e a manilha indicada; anima uma vez por mão e não se repete ao reconectar.
+- Manilhas da própria mão com contorno, halo e selo de estrela dourados; ao receber uma manilha, uma revelação especial (brilho e estrela central) roda uma única vez no aparelho do dono da carta.
 - Truco Paulista completo: manilha variável, vazas, pedidos 3/6/9/12, placar automático até 12 pontos.
 - Histórico com CRUD de notas ligadas às partidas.
 - **Não implementado (P1):** QR code da sala.
@@ -37,14 +38,31 @@ React Native, Expo, TypeScript e Expo Router no cliente, com `react-native-svg` 
 ## Pré-requisitos
 
 - Node.js LTS e npm.
-- Aplicativo Expo Go em um celular ou um emulador Android.
+- Aplicativo Expo Go num celular Android ou iPhone (a versão da loja precisa suportar o SDK 57 do projeto), ou um emulador Android. Simulador iOS só num Mac com Xcode.
 - O projeto Supabase do grupo, com as migrations e as Edge Functions publicadas (ver "Backend").
 
 ## Como executar
 
 1. `npm install`
 2. Copiar `.env.example` para `.env` e preencher com a URL e a chave anon do projeto Supabase (sem `/rest/v1/` no fim da URL).
-3. `npx expo start` e ler o QR code com o Expo Go.
+3. `npx expo start` e ler o QR code: no Android, com o Expo Go; no iPhone, com a câmera, que abre o Expo Go.
+
+### iOS
+
+O app é o mesmo nas duas plataformas (sem código nativo próprio). Configuração específica em `app.json`:
+
+| Campo | Por quê |
+|---|---|
+| `userInterfaceStyle: "dark"` | O app é escuro; com `light`, alertas e teclado do iOS apareciam claros |
+| `ios.bundleIdentifier: "br.senai.decky"` | Obrigatório para build nativo. Troque se o grupo tiver um domínio próprio, **antes** do primeiro envio à App Store |
+| `ios.requireFullScreen: true` | App só em retrato com `supportsTablet`: sem isso a App Store recusa o envio (a multitarefa do iPad exige todas as orientações) |
+| `ios.config.usesNonExemptEncryption: false` | Só HTTPS padrão: dispensa a pergunta de exportação de criptografia no TestFlight |
+
+- Pelo Expo Go: `npx expo start` e o QR code, como acima.
+- Simulador (Mac com Xcode): `npm run ios`.
+- Build instalável: `npx eas-cli build -p ios` (EAS Build, o serviço de build na nuvem da Expo; precisa de conta Apple Developer).
+
+O que foi verificado sem Mac e o que ainda precisa de aparelho Apple está em [docs/QA_DEMO.md](docs/QA_DEMO.md#ios).
 
 ### Backend
 
@@ -62,7 +80,7 @@ Para a demonstração, desligue **Confirm email** em Authentication > Providers 
 |---|---|
 | `tests/engine/` | Motor do truco: baralho, manilha, vazas, empates, truco 3/6/9/12, correr, mão de 11, 200 partidas aleatórias |
 | `tests/sql/` | Migrations reais num Postgres em memória (PGlite): salas, modo mesa, RLS, mãos privadas, idempotência, conflito de revisão, CRUD de notas e, em `flow.test.ts`, o código das Edge Functions jogando com 5 aparelhos (incluindo uma partida inteira até 12) |
-| `tests/app/` | REGEX de e-mail, senha e nome; textos da mesa; geometria sem sobreposição; distribuição (ordem, fases calculadas no render, chegada das cartas, uma vez por mão); controles de truco; papel do aparelho e tela do jogador com mesa dedicada; leituras repetidas sem re-render; canais Realtime únicos |
+| `tests/app/` | REGEX de e-mail, senha e nome; textos da mesa; geometria sem sobreposição; distribuição (ordem, fases calculadas no render, chegada das cartas, uma vez por mão); manilhas na mão (identificação pela vira, destaque só com a vira aberta, revelação escalonada para 1 a 3 manilhas, sem repetição); controles de truco; papel do aparelho e tela do jogador com mesa dedicada; leituras repetidas sem re-render; canais Realtime únicos |
 
 `npm run typecheck` confere os tipos do app e do motor. O projeto não tem lint configurado.
 

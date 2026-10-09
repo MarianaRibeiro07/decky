@@ -66,6 +66,7 @@ export default function Register() {
         error={errors.email}
         autoCapitalize="none"
         autoComplete="email"
+        autoCorrect={false}
         keyboardType="email-address"
         placeholder="nome@email.com"
       />
@@ -83,6 +84,8 @@ export default function Register() {
         onChangeText={set('confirmation')}
         error={errors.confirmation}
         secureTextEntry
+        autoComplete="new-password"
+        returnKeyType="done"
         onSubmitEditing={submit}
       />
       <Notice kind="error" message={serverError} />

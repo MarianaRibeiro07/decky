@@ -52,6 +52,7 @@ export default function Login() {
         error={errors.email}
         autoCapitalize="none"
         autoComplete="email"
+        autoCorrect={false}
         keyboardType="email-address"
         placeholder="nome@email.com"
       />
@@ -62,6 +63,7 @@ export default function Login() {
         error={errors.password}
         secureTextEntry
         autoComplete="current-password"
+        returnKeyType="go"
         onSubmitEditing={submit}
       />
       <Notice kind="error" message={serverError} />

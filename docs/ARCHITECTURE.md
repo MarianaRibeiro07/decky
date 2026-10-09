@@ -182,6 +182,7 @@ Distribuição (`src/game/deal.ts`, animada com React Native Reanimated):
 3. As 12 cartas saem do baralho (verso `assets/Fundo-Carta-Vermelho.png`) na ordem real: começando à direita de quem embaralhou, uma por vez, três voltas.
 4. Cada carta da própria mão aparece quando a carta voadora correspondente pousa.
 5. A vira vira de face; depois aparece o selo da manilha; então a vez é destacada.
+6. Cada manilha da própria mão ganha a revelação especial (ver "Manilha na mão").
 
 Regras da animação:
 
@@ -194,9 +195,20 @@ Regras da animação:
 - Cartas na mesa têm chave pela própria carta (`playedCardKey`): quando a vaza fecha, as três primeiras esmaecem no lugar e só a quarta entra voando. Ao abrir a tela ou reconectar, `LayoutAnimationConfig skipEntering` mostra o que já estava na mesa e na mão sem refazer as entradas.
 - Na mão, a animação de layout fica num invólucro e o deslocamento da carta selecionada numa view interna (o Reanimated avisava que o `transform` seria sobrescrito).
 
+## Manilha na mão
+
+`src/game/manilha.ts` (puro, testado em `tests/app/manilha.test.ts`) e `ManilhaReveal`:
+
+- **Identificação:** `card.rank === manilhaRank`, a mesma regra do motor. A manilha vem do estado público (calculada pelo motor a partir da vira) e as cartas, da mão privada que só o dono recebe. Nada novo é enviado a nenhum aparelho; a mesa central nunca tem mão, então nunca anima nem destaca manilha.
+- **Destaque permanente:** contorno e halo dourados e um selo (medalha escura com estrela) no canto superior direito, metade para fora da carta, sem cobrir valor nem naipe. A estrela marca a manilha pela forma, não só pela cor, e o leitor de tela diz "rei de paus, manilha". Só aparece com a vira aberta (antes, a mão mostrava "★ manilha" escrito embaixo da carta assim que ela chegava, antes de a vira virar).
+- **Revelação:** o brilho dourado sobe na carta, a estrela surge girando no centro, há um pico com onda de luz e faíscas e depois a dissipação; fica o destaque permanente. 1,5 s por manilha, escalonadas em 0,6 s da esquerda para a direita (os picos nunca coincidem; três manilhas terminam ~2,9 s depois da vira). Não bloqueia nada: a carta segue selecionável e jogável durante o efeito.
+- **Sem repetição:** os horários saem do `dealTracker` (a mesma execução da distribuição), não da renderização. Render repetido, sincronização, volta à tela e reconexão devolvem os mesmos horários; depois do fim, nada é montado. Entrar no meio da mão não anima. Remontar no meio retoma do ponto. O plano fica fixo depois de feito, então jogar uma manilha no meio não reescalona as outras.
+- **Desempenho:** camadas SVG estáticas (halo radial, contorno, onda, brilho em cruz, quatro faíscas, estrela com degradê) dentro de `Animated.View`; só opacidade, escala e rotação animam, na thread de UI, guiadas por um único valor de progresso. Com "reduzir movimento" ligado, o efeito não é montado.
+
 ## Jogada e controles
 
-- Tocar numa carta a seleciona (sobe e ganha borda vermelha); "Jogar" ou um segundo toque confirma. Dá para pré-selecionar fora da vez.
+- Tocar numa carta a seleciona (sobe e ganha borda: vermelha com brilho quando dá para jogar agora, metálica quando ainda não é a vez); "Jogar" ou um segundo toque confirma. Dá para pré-selecionar fora da vez.
+- Fileira de ações, da esquerda para a direita: Correr (contorno, bandeira, longe do polegar), Pedir truco (bronze, setas) e Jogar (laca vermelha, maior, à direita: ação principal). Ícones em SVG (`src/ui/icons.tsx`) em cima do rótulo, para os três caberem numa linha num iPhone SE. O botão de jogar diz por que está parado: "Distribuindo…", "Aguarde a vez" ou "Escolha a carta".
 - Uma trava síncrona impede dois envios por toque duplo; o servidor também é idempotente pelo `clientActionId`.
 - Os botões de truco vêm de `trucoControls`, espelho de `getLegalActions`: pedir (TRUCO, SEIS, NOVE ou DOZE, conforme o valor) e, para a dupla que responde, Aceitar, Correr e Pedir o próximo valor. A dupla que pediu vê "Aguardando a outra dupla responder". Correr sem pedido pendente pede confirmação.
 - A carta jogada entra na mesa vindo do lado de quem jogou; a vencedora da vaza é destacada quando a mesa limpa.
@@ -229,6 +241,7 @@ Cassino reservado: preto e grafite dominam, a mesa é o destaque. O logo (`asset
 | Tokens | `src/ui/theme.ts`: cores (fundo, superfícies, texto, logo, dourado, mesa, duplas), fontes, tamanhos, espaços, raios e sombras. Telas não definem cores soltas |
 | Tipografia | Playfair Display (`@expo-google-fonts/playfair-display`, pesos 700 e 900) em títulos, saudação e números do placar, com `fontVariant: ['lining-nums']` para os algarismos ficarem alinhados. Textos funcionais, botões e cartas ficam na fonte do sistema. A fonte é carregada em `app/_layout.tsx`; se falhar, o app segue com a do sistema |
 | Mesa | `TableSurface` desenha em SVG (`react-native-svg`, já usado no projeto) o tampo em superelipse: lateral visível embaixo (espessura), aro de couro com costura e reflexo da luminária, trilho metálico, feltro carvão com luz no centro, textura (`assets/textures/felt.png`, 128 px que repete sem emenda) e sombra interna do trilho. É estático e memorizado por tamanho. `surfaceMetrics` diz onde fica o feltro; o `TableBoard` posiciona lugares e cartas nessa área com a mesma `tableGeometry` de antes |
+| Baralho | Faces de Byron Knoll em papel marfim (não branco puro, que ofuscava sobre o preto) e verso do grupo na mesma proporção das faces (500 x 726). `scripts/build_cards.py` aplica o tom e reduz a paleta com pontilhado: o baralho caiu de 4,0 MB para 1,5 MB sem faixas nos degradês. A moldura (`PlayingCard`) tem raio proporcional à largura (`cardRadius`), igual ao canto desenhado na arte |
 | Cartas na mesa | Sombra curta de apoio (`boxShadow`) e leve inclinação por lugar (só `rotate`, sem deformar). A inclinação fica numa view interna para não brigar com a animação de entrada |
 | Profundidade | Sem engine 3D nem perspectiva real: a perspectiva distorceria as cartas e complicaria o toque. A sensação de objeto físico vem da lateral do tampo, das sombras e da luz. Pés da mesa não aparecem porque o enquadramento é de cima |
 | Telas | `Screen` (fundo `Backdrop` + título com filete dourado), `Panel` (superfície grafite), `Button` (`primary` laca vermelha, `dark` grafite, `secondary` contorno, `gold` bronze, `ghost` só texto; estados pressionado, desabilitado e carregando) e `FeltPanel` (bandeja de feltro do HUD e do lobby, em retângulo com cantos de raio fixo: assim o recuo do conteúdo vale em qualquer tamanho) |
