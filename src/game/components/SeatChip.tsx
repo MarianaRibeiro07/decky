@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import type { Team } from '../../contracts/types';
 import { CARD_BACK } from '../../ui/PlayingCard';
-import { colors, font, radius } from '../../ui/theme';
+import { colors, font, radius, shadow } from '../../ui/theme';
 import type { Rect } from '../geometry';
 
 interface Props {
@@ -25,7 +25,10 @@ interface Props {
   large: boolean;
 }
 
-/** Etiqueta de um lugar na mesa: nome, dupla, cartas na mão e destaque de quem é a vez. */
+/**
+ * Plaquinha de um lugar na mesa: nome, dupla, cartas na mão e destaque de quem é a vez.
+ * Fica na borda do feltro, de frente para quem senta ali; na vez, ganha contorno dourado que pulsa de leve.
+ */
 export function SeatChip({ rect, name, teamText, team, isTurn, cardsLeft, large }: Props) {
   const pulse = useSharedValue(0);
 
@@ -39,8 +42,8 @@ export function SeatChip({ rect, name, teamText, team, isTurn, cardsLeft, large 
   }, [isTurn, pulse]);
 
   const ring = useAnimatedStyle(() => ({
-    opacity: isTurn ? 0.35 + pulse.value * 0.5 : 0,
-    transform: [{ scale: 1 + pulse.value * 0.06 }],
+    opacity: isTurn ? 0.25 + pulse.value * 0.5 : 0,
+    transform: [{ scale: 1 + pulse.value * 0.04 }],
   }));
 
   const teamColor = team === 'A' ? colors.teamA : colors.teamB;
@@ -86,25 +89,28 @@ const styles = StyleSheet.create({
   wrap: { position: 'absolute' },
   ring: {
     ...StyleSheet.absoluteFill,
-    borderRadius: radius.md,
-    borderWidth: 3,
+    borderRadius: radius.sm + 2,
+    borderWidth: 2,
     borderColor: colors.gold,
+    boxShadow: shadow.turn,
   },
   chip: {
     flex: 1,
     flexDirection: 'row',
     borderRadius: radius.sm,
-    backgroundColor: '#00000059',
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    backgroundColor: '#0B0B0DE0',
     overflow: 'hidden',
   },
-  chipTurn: { backgroundColor: colors.gold },
-  teamBar: { width: 5 },
+  chipTurn: { backgroundColor: '#1E1A12F2', borderColor: colors.gold },
+  teamBar: { width: 4 },
   body: { flex: 1, paddingHorizontal: 6, justifyContent: 'center' },
-  name: { color: colors.paper, fontSize: font.small, fontWeight: '800' },
+  name: { color: colors.text, fontSize: font.small, fontWeight: '800' },
   nameLarge: { fontSize: font.body },
-  team: { color: colors.feltText, fontSize: font.small - 3, fontWeight: '600', flexShrink: 1 },
+  team: { color: colors.textMuted, fontSize: font.small - 3, fontWeight: '600', flexShrink: 1 },
   teamLarge: { fontSize: font.small },
-  textTurn: { color: colors.ink },
+  textTurn: { color: colors.goldSoft },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   subRowStacked: { flexDirection: 'column', alignItems: 'flex-start', gap: 2 },
   backs: { flexDirection: 'row', gap: 2 },

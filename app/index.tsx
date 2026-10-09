@@ -1,29 +1,48 @@
 import { router } from 'expo-router';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { signOut, useAuth } from '../src/auth/AuthProvider';
 import { Button } from '../src/ui/Button';
 import { Logo } from '../src/ui/Logo';
+import { Ornament } from '../src/ui/Ornament';
 import { Screen } from '../src/ui/Screen';
-import { colors, font } from '../src/ui/theme';
+import { colors, fonts, space } from '../src/ui/theme';
 
 export default function Home() {
   const { displayName } = useAuth();
 
   return (
     <Screen>
-      <Logo size={150} />
-      <Text style={styles.greeting} accessibilityRole="header">
-        Olá, {displayName}!
-      </Text>
-      <Button label="Criar sala" onPress={() => router.push('/room/create')} hint="Escolha se você joga ou se este celular vira a mesa" />
-      <Button label="Entrar na sala" variant="dark" onPress={() => router.push('/room/join')} />
-      <Button label="Histórico e notas" variant="secondary" onPress={() => router.push('/history')} />
-      <Button label="Sair da conta" variant="secondary" onPress={signOut} style={styles.logout} />
+      <Animated.View entering={FadeIn.duration(400)} style={styles.hero}>
+        <Logo size={176} />
+        <Text style={styles.greeting} accessibilityRole="header">
+          Olá, {displayName}
+        </Text>
+        <Ornament width={240} />
+        <Text style={styles.tagline}>TRUCO PAULISTA · DUAS DUPLAS · UMA MESA</Text>
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.duration(350).delay(120)} style={styles.actions}>
+        <Button
+          label="Criar sala"
+          caption="Você joga ou este celular vira a mesa"
+          onPress={() => router.push('/room/create')}
+        />
+        <Button label="Entrar na sala" caption="Com o código de 6 letras" variant="dark" onPress={() => router.push('/room/join')} />
+        <Button label="Histórico e notas" variant="secondary" onPress={() => router.push('/history')} />
+      </Animated.View>
+
+      <View style={styles.footer}>
+        <Button label="Sair da conta" variant="ghost" size="compact" onPress={signOut} />
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  greeting: { fontSize: font.title, fontWeight: '800', color: colors.ink, textAlign: 'center' },
-  logout: { marginTop: 'auto' },
+  hero: { alignItems: 'center', gap: space.md, paddingTop: space.md, paddingBottom: space.sm },
+  greeting: { fontFamily: fonts.display, fontSize: 30, lineHeight: 38, color: colors.text, textAlign: 'center' },
+  tagline: { fontSize: 12, letterSpacing: 2, color: colors.textFaint, textAlign: 'center', fontWeight: '600' },
+  actions: { gap: space.sm + 4 },
+  footer: { marginTop: 'auto', alignItems: 'center' },
 });

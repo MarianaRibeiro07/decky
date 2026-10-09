@@ -1,7 +1,7 @@
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import type { Card, Suit } from '../contracts/types';
 import { cardImage } from './cardImages';
-import { colors, radius } from './theme';
+import { colors, radius, shadow } from './theme';
 
 const SUIT_NAMES: Record<Suit, string> = { ouros: 'ouros', espadas: 'espadas', copas: 'copas', paus: 'paus' };
 const RANK_NAMES: Record<string, string> = { Q: 'dama', J: 'valete', K: 'rei', A: 'ás' };
@@ -29,30 +29,33 @@ interface Props {
   /** Carta escolhida na mão, aguardando confirmação. */
   selected?: boolean;
   dimmed?: boolean;
+  /** Sombra de apoio: 'table' para carta pousada no feltro, 'lifted' para a carta erguida na mão. */
+  elevation?: 'none' | 'table' | 'lifted';
   onPress?: () => void;
   disabled?: boolean;
   hint?: string;
 }
 
-export function PlayingCard({ card, width, faceDown, highlighted, selected, dimmed, onPress, disabled, hint }: Props) {
+export function PlayingCard({ card, width, faceDown, highlighted, selected, dimmed, elevation = 'none', onPress, disabled, hint }: Props) {
   const height = width * RATIO;
   const face = !faceDown && card ? card : null;
+  // A sombra fica num invólucro: no quadro de dentro o `overflow: hidden` (cantos da imagem) a cortaria.
   const image = (
     <View
       style={[
-        styles.frame,
-        { width, height },
-        highlighted && styles.highlighted,
-        selected && styles.selected,
+        styles.shadowBox,
+        elevation !== 'none' && { boxShadow: elevation === 'lifted' ? shadow.cardLifted : shadow.card },
         dimmed && styles.dimmed,
       ]}
     >
-      <Image
-        source={face ? cardImage(face) : BACK}
-        style={styles.image}
-        resizeMode={face ? 'contain' : 'cover'}
-        accessibilityIgnoresInvertColors
-      />
+      <View style={[styles.frame, { width, height }, highlighted && styles.highlighted, selected && styles.selected]}>
+        <Image
+          source={face ? cardImage(face) : BACK}
+          style={styles.image}
+          resizeMode={face ? 'contain' : 'cover'}
+          accessibilityIgnoresInvertColors
+        />
+      </View>
     </View>
   );
 
@@ -80,16 +83,18 @@ export function PlayingCard({ card, width, faceDown, highlighted, selected, dimm
 }
 
 const styles = StyleSheet.create({
+  shadowBox: { borderRadius: radius.sm },
   frame: {
     borderRadius: radius.sm,
-    backgroundColor: colors.paper,
+    // Branco: é a cor do papel das imagens das cartas (os cantos delas são transparentes).
+    backgroundColor: '#FFFFFF',
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#00000033',
+    borderColor: '#00000055',
   },
   image: { width: '100%', height: '100%' },
-  highlighted: { borderWidth: 4, borderColor: colors.gold },
-  selected: { borderWidth: 4, borderColor: colors.red },
-  dimmed: { opacity: 0.55 },
+  highlighted: { borderWidth: 3, borderColor: colors.gold },
+  selected: { borderWidth: 3, borderColor: colors.red },
+  dimmed: { opacity: 0.5 },
   pressed: { transform: [{ translateY: -10 }] },
 });

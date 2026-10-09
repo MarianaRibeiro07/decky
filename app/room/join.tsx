@@ -7,7 +7,7 @@ import { Button } from '../../src/ui/Button';
 import { Notice } from '../../src/ui/Notice';
 import { Screen } from '../../src/ui/Screen';
 import { TextField } from '../../src/ui/TextField';
-import { font } from '../../src/ui/theme';
+import { colors, font } from '../../src/ui/theme';
 
 const CODE_REGEX = /^[A-HJ-NP-Z2-9]{6}$/;
 
@@ -37,7 +37,7 @@ export default function JoinRoom() {
   }
 
   return (
-    <Screen title="Entrar na sala">
+    <Screen title="Entrar na sala" subtitle="Peça o código para quem criou a sala.">
       <TextField
         label="Código da sala"
         value={code}
@@ -45,17 +45,17 @@ export default function JoinRoom() {
         autoCapitalize="characters"
         autoCorrect={false}
         maxLength={6}
-        placeholder="EX.: K7M2QX"
+        placeholder="K7M2QX"
         inputStyle={styles.code}
         onSubmitEditing={submit}
       />
       <Notice kind="error" message={error} />
       <Button label="Entrar" onPress={submit} loading={loading} />
-      <Button label="Voltar" variant="secondary" onPress={() => router.back()} />
+      <Button label="Voltar" variant="ghost" onPress={() => router.back()} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  code: { fontSize: font.huge, letterSpacing: 6 },
+  code: { fontSize: font.huge - 4, fontWeight: '800', letterSpacing: 6, textAlign: 'center', color: colors.goldSoft },
 });

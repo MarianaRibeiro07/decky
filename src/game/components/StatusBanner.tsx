@@ -13,18 +13,18 @@ export function StatusBanner({ status, large }: { status: StatusText | null; lar
       <Animated.Text
         key={status.main}
         entering={FadeIn.duration(200)}
-        style={[styles.main, large && styles.mainLarge, (truco || turn) && styles.mainDark]}
+        style={[styles.main, large && styles.mainLarge, turn && styles.mainTurn, truco && styles.mainTruco]}
         numberOfLines={2}
       >
         {status.main}
       </Animated.Text>
       {status.recap ? (
-        <Text style={[styles.sub, large && styles.subLarge, (truco || turn) && styles.subDark]} numberOfLines={1}>
+        <Text style={[styles.sub, large && styles.subLarge, truco && styles.subTruco]} numberOfLines={1}>
           {status.recap}
         </Text>
       ) : null}
       {status.extra ? (
-        <Text style={[styles.sub, large && styles.subLarge, (truco || turn) && styles.subDark]} numberOfLines={1}>
+        <Text style={[styles.sub, large && styles.subLarge, truco && styles.subTruco]} numberOfLines={1}>
           {status.extra}
         </Text>
       ) : null}
@@ -43,15 +43,32 @@ export function ConnectionBanner({ status }: { status: 'connecting' | 'online' |
 }
 
 const styles = StyleSheet.create({
-  box: { backgroundColor: '#00000038', borderRadius: radius.md, paddingVertical: space.xs + 2, paddingHorizontal: space.sm, gap: 1 },
-  truco: { backgroundColor: colors.gold },
-  turn: { backgroundColor: colors.paper },
-  main: { color: colors.paper, fontSize: font.body + 1, fontWeight: '900', textAlign: 'center' },
+  box: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    paddingVertical: space.xs + 2,
+    paddingHorizontal: space.sm,
+    gap: 1,
+  },
+  // Pedido de truco: laca vermelha do logo. Sua vez: contorno dourado.
+  truco: { backgroundColor: colors.redDeep, borderColor: colors.red },
+  turn: { backgroundColor: '#1E1A12', borderColor: colors.gold },
+  main: { color: colors.text, fontSize: font.body + 1, fontWeight: '800', textAlign: 'center' },
   mainLarge: { fontSize: font.title },
-  mainDark: { color: colors.ink },
-  sub: { color: colors.feltText, fontSize: font.small - 1, textAlign: 'center' },
+  mainTurn: { color: colors.goldSoft },
+  mainTruco: { color: colors.cream },
+  sub: { color: colors.textMuted, fontSize: font.small - 1, textAlign: 'center' },
   subLarge: { fontSize: font.body },
-  subDark: { color: colors.ink },
-  connection: { backgroundColor: colors.redDark, borderRadius: radius.sm, paddingVertical: 4, paddingHorizontal: space.sm },
-  connectionText: { color: colors.paper, fontSize: font.small - 1, fontWeight: '700', textAlign: 'center' },
+  subTruco: { color: '#F3C9CF' },
+  connection: {
+    backgroundColor: colors.errorBg,
+    borderWidth: 1,
+    borderColor: '#7A1427',
+    borderRadius: radius.sm,
+    paddingVertical: 4,
+    paddingHorizontal: space.sm,
+  },
+  connectionText: { color: colors.redText, fontSize: font.small - 1, fontWeight: '700', textAlign: 'center' },
 });

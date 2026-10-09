@@ -2,7 +2,9 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import type { PublicGameState, Team } from '../../contracts/types';
 import { Button } from '../../ui/Button';
-import { colors, font, radius, space } from '../../ui/theme';
+import { Logo } from '../../ui/Logo';
+import { TitleRule } from '../../ui/Ornament';
+import { colors, font, fonts, radius, shadow, space } from '../../ui/theme';
 import { teamLabel } from '../describe';
 
 interface Props {
@@ -32,23 +34,39 @@ export function FinishedOverlay({ state, viewerTeam, onRoom, onHome, onNote }: P
   return (
     <Animated.View entering={FadeIn.duration(250)} style={styles.overlay}>
       <Animated.View entering={ZoomIn.duration(300)} style={styles.card} accessibilityViewIsModal>
+        <Logo size={72} halo={false} />
         <Text style={styles.title} accessibilityRole="header">
           {title}
         </Text>
+        <View style={styles.rule}>
+          <TitleRule />
+        </View>
         <Text style={styles.score}>
           {teamLabel(left, viewerTeam)} {state.score[left]} × {state.score[right]} {teamLabel(right, viewerTeam)}
         </Text>
         <Button label="Voltar para a sala" onPress={onRoom} />
         {onNote ? <Button label="Escrever nota sobre a partida" variant="dark" onPress={onNote} /> : null}
-        <Button label="Início" variant="secondary" onPress={onHome} />
+        <Button label="Início" variant="ghost" onPress={onHome} />
       </Animated.View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFill, backgroundColor: '#000000AA', justifyContent: 'center', padding: space.lg },
-  card: { backgroundColor: colors.cream, borderRadius: radius.lg, padding: space.lg, gap: space.md },
-  title: { fontSize: font.title + 4, fontWeight: '900', color: colors.ink, textAlign: 'center' },
-  score: { fontSize: font.large, fontWeight: '700', color: colors.muted, textAlign: 'center' },
+  overlay: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim, justifyContent: 'center', padding: space.lg },
+  card: {
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.goldDeep,
+    padding: space.lg,
+    gap: space.md,
+    boxShadow: shadow.panel,
+  },
+  title: { fontFamily: fonts.display, fontSize: font.title + 4, lineHeight: 42, color: colors.text, textAlign: 'center' },
+  rule: { alignItems: 'center', marginTop: -space.xs },
+  score: { fontFamily: fonts.display, fontVariant: ['lining-nums'], fontSize: font.large, color: colors.goldSoft, textAlign: 'center' },
 });

@@ -7,6 +7,7 @@ import { describeHand, describeTrick, eventBubble, teamLabel } from '../../src/g
 import { hasOverlap, tableGeometry } from '../../src/game/geometry';
 import { resolveRole } from '../../src/game/role';
 import { statusText } from '../../src/game/status';
+import { superellipsePath, surfaceMetrics } from '../../src/ui/shapes';
 
 const base = (): PublicGameState => newMatch(seededRng(1)).public;
 const names: Record<Seat, string> = { 1: 'Ana', 2: 'Bia', 3: 'Caio', 4: 'Duda' };
@@ -20,21 +21,57 @@ describe('geometria da mesa', () => {
     ['mesa dedicada', 395, 560, 'large'],
     ['mesa dedicada em tablet', 760, 820, 'large'],
   ] as const)('%s: lugares, cartas, baralho e vira não se sobrepõem', (_, w, h, variant) => {
-    const g = tableGeometry(w, h, variant);
+    // O conteúdo fica na área do feltro, dentro do aro de couro (como o TableBoard desenha).
+    const area = surfaceMetrics(w, h, variant === 'large' ? 'table' : 'compact').content;
+    const g = tableGeometry(area.w, area.h, variant);
     expect(hasOverlap(g)).toBe(false);
-    // Carta legível mesmo no celular pequeno.
+    // Carta legível mesmo no celular pequeno, já descontado o aro.
     expect(g.card.w).toBeGreaterThanOrEqual(40);
-    // Tudo dentro da área.
+    // Tudo dentro da área do feltro.
     for (const r of [...Object.values(g.chips), ...Object.values(g.played), g.deck, g.vira]) {
       expect(r.x).toBeGreaterThanOrEqual(0);
       expect(r.y).toBeGreaterThanOrEqual(0);
-      expect(r.x + r.w).toBeLessThanOrEqual(w + 0.001);
-      expect(r.y + r.h).toBeLessThanOrEqual(h + 0.001);
+      expect(r.x + r.w).toBeLessThanOrEqual(area.w + 0.001);
+      expect(r.y + r.h).toBeLessThanOrEqual(area.h + 0.001);
     }
   });
 
   it('a mesa dedicada usa cartas maiores que a metade de cima do jogador', () => {
-    expect(tableGeometry(395, 560, 'large').card.w).toBeGreaterThan(tableGeometry(395, 330, 'compact').card.w);
+    const large = surfaceMetrics(395, 560, 'table').content;
+    const compact = surfaceMetrics(395, 330, 'compact').content;
+    expect(tableGeometry(large.w, large.h, 'large').card.w).toBeGreaterThan(tableGeometry(compact.w, compact.h, 'compact').card.w);
+  });
+});
+
+describe('tampo da mesa', () => {
+  it.each(['table', 'compact', 'panel'] as const)('%s: feltro dentro do tampo e conteúdo dentro da área', (variant) => {
+    const m = surfaceMetrics(395, 560, variant);
+    expect(m.felt.x).toBeGreaterThan(m.top.x);
+    expect(m.felt.y).toBeGreaterThan(m.top.y);
+    expect(m.felt.x + m.felt.w).toBeLessThan(m.top.x + m.top.w);
+    expect(m.felt.y + m.felt.h).toBeLessThan(m.top.y + m.top.h);
+    // A lateral do tampo (espessura) cabe embaixo, dentro da área medida.
+    expect(m.top.y + m.top.h + m.apron).toBeLessThanOrEqual(560);
+    expect(m.content.x).toBeGreaterThanOrEqual(0);
+    expect(m.content.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it('o aro da mesa dedicada é mais grosso que o da mesa compacta', () => {
+    expect(surfaceMetrics(395, 560, 'table').rim).toBeGreaterThan(surfaceMetrics(395, 330, 'compact').rim);
+  });
+
+  it('superelipse: caminho fechado, inscrito na caixa e tocando os quatro lados', () => {
+    const box = { x: 10, y: 20, w: 300, h: 400 };
+    const d = superellipsePath(box, 3.4);
+    expect(d.startsWith('M')).toBe(true);
+    expect(d.endsWith('Z')).toBe(true);
+    const pts = [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    expect(Math.min(...xs)).toBeCloseTo(box.x, 0);
+    expect(Math.max(...xs)).toBeCloseTo(box.x + box.w, 0);
+    expect(Math.min(...ys)).toBeCloseTo(box.y, 0);
+    expect(Math.max(...ys)).toBeCloseTo(box.y + box.h, 0);
   });
 });
 

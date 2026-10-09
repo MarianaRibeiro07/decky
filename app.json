@@ -23,7 +23,8 @@
     },
     "scheme": "decky",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-font"
     ]
   }
 }

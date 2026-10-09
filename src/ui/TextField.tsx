@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { StyleSheet, Text, TextInput, View, type StyleProp, type TextInputProps, type TextStyle } from 'react-native';
 import { colors, font, radius, space, TOUCH_MIN } from './theme';
 
@@ -7,14 +8,26 @@ interface Props extends Omit<TextInputProps, 'style'> {
   inputStyle?: StyleProp<TextStyle>;
 }
 
-export function TextField({ label, error, inputStyle, ...input }: Props) {
+export function TextField({ label, error, inputStyle, onFocus, onBlur, ...input }: Props) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.wrapper}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
-        placeholderTextColor={colors.muted}
-        style={[styles.input, error ? styles.inputError : null, inputStyle]}
+        placeholderTextColor={colors.textFaint}
+        selectionColor={colors.gold}
+        cursorColor={colors.gold}
+        keyboardAppearance="dark"
+        style={[styles.input, focused && styles.inputFocused, error ? styles.inputError : null, inputStyle]}
+        onFocus={(e) => {
+          setFocused(true);
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          onBlur?.(e);
+        }}
         {...input}
       />
       {error ? (
@@ -27,18 +40,19 @@ export function TextField({ label, error, inputStyle, ...input }: Props) {
 }
 
 const styles = StyleSheet.create({
-  wrapper: { gap: space.xs },
-  label: { fontSize: font.body, fontWeight: '700', color: colors.ink },
+  wrapper: { gap: space.xs + 2 },
+  label: { fontSize: font.small, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.3 },
   input: {
     minHeight: TOUCH_MIN + 8,
-    borderWidth: 2,
-    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderColor: colors.lineStrong,
     borderRadius: radius.md,
     paddingHorizontal: space.md,
-    fontSize: font.large,
-    color: colors.ink,
-    backgroundColor: colors.paper,
+    fontSize: font.large - 2,
+    color: colors.text,
+    backgroundColor: colors.surfaceSunken,
   },
+  inputFocused: { borderColor: colors.gold },
   inputError: { borderColor: colors.red },
-  error: { fontSize: font.small + 1, color: colors.redDark, fontWeight: '600' },
+  error: { fontSize: font.small, color: colors.redText, fontWeight: '600' },
 });

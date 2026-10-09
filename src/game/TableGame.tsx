@@ -72,6 +72,6 @@ export function TableGame({ match, players, connection }: Props) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.felt, gap: space.sm },
-  footer: { color: colors.feltText, fontSize: font.small - 2, textAlign: 'center', opacity: 0.85 },
+  screen: { flex: 1, backgroundColor: colors.bg, gap: space.sm },
+  footer: { color: colors.textFaint, fontSize: font.small - 3, letterSpacing: 0.6, textAlign: 'center' },
 });

@@ -52,7 +52,8 @@ Princípios:
 | `src/lib/useRerenderAt.ts` | Redesenha nos instantes em que uma fase de animação muda (timers limpos ao desmontar) |
 | `src/history/` | Histórico e CRUD de notas |
 | `src/auth/` | Sessão, cadastro, login e validação por REGEX |
-| `src/ui/` | Tema, botão, campo, aviso, carta |
+| `src/ui/` | Identidade visual: tokens (`theme.ts`), botão, campo, aviso, painel, carta, fundo do salão (`Backdrop`), ornamento de naipes e o tampo da mesa (`TableSurface`, `FeltPanel`) |
+| `src/ui/shapes.ts` | Formato e medidas do tampo da mesa: superelipse, aro, trilho, feltro e área do conteúdo (puro, testado) |
 | `app/` | Telas (Expo Router) |
 | `tests/engine/`, `tests/sql/`, `tests/app/` | Testes do motor, do banco (PGlite) e do app |
 
@@ -189,6 +190,23 @@ Regras da animação:
 - A carta jogada entra na mesa vindo do lado de quem jogou; a vencedora da vaza é destacada quando a mesa limpa.
 - Quem pediu, aceitou ou correu ganha uma fala curta ao lado do nome ("TRUCO!", "Aceito!", "Corro!") em todos os aparelhos, a partir de `lastEvent`.
 
+## Identidade visual
+
+Cassino reservado: preto e grafite dominam, a mesa é o destaque. O logo (`assets/Decky-Logo.png`) é usado sem alteração; o creme, o vermelho e o contorno quase preto dele são as cores de acento, e o dourado envelhecido (`colors.gold`) aparece só em pontos de estado: vez de jogar, manilha, vencedor da vaza e partida ganha.
+
+| Peça | Como é feita |
+|---|---|
+| Tokens | `src/ui/theme.ts`: cores (fundo, superfícies, texto, logo, dourado, mesa, duplas), fontes, tamanhos, espaços, raios e sombras. Telas não definem cores soltas |
+| Tipografia | Playfair Display (`@expo-google-fonts/playfair-display`, pesos 700 e 900) em títulos, saudação e números do placar, com `fontVariant: ['lining-nums']` para os algarismos ficarem alinhados. Textos funcionais, botões e cartas ficam na fonte do sistema. A fonte é carregada em `app/_layout.tsx`; se falhar, o app segue com a do sistema |
+| Mesa | `TableSurface` desenha em SVG (`react-native-svg`, já usado no projeto) o tampo em superelipse: lateral visível embaixo (espessura), aro de couro com costura e reflexo da luminária, trilho metálico, feltro carvão com luz no centro, textura (`assets/textures/felt.png`, 128 px que repete sem emenda) e sombra interna do trilho. É estático e memorizado por tamanho. `surfaceMetrics` diz onde fica o feltro; o `TableBoard` posiciona lugares e cartas nessa área com a mesma `tableGeometry` de antes |
+| Cartas na mesa | Sombra curta de apoio (`boxShadow`) e leve inclinação por lugar (só `rotate`, sem deformar). A inclinação fica numa view interna para não brigar com a animação de entrada |
+| Profundidade | Sem engine 3D nem perspectiva real: a perspectiva distorceria as cartas e complicaria o toque. A sensação de objeto físico vem da lateral do tampo, das sombras e da luz. Pés da mesa não aparecem porque o enquadramento é de cima |
+| Telas | `Screen` (fundo `Backdrop` + título com filete dourado), `Panel` (superfície grafite), `Button` (`primary` laca vermelha, `dark` grafite, `secondary` contorno, `gold` bronze, `ghost` só texto; estados pressionado, desabilitado e carregando) e `FeltPanel` (bandeja de feltro do HUD e do lobby) |
+
+Sombras usam `boxShadow`, que no React Native 0.86 funciona no Android e no iOS (nova arquitetura). Cartas voando na distribuição não têm sombra, para não pesar.
+
+Custo da borda da mesa: o aro tira espaço das cartas. Para compensar, as plaquinhas dos lugares avançam sobre o couro na mesa dedicada. Medido com `tableGeometry`: a carta da mesa dedicada ficou de 7% a 12% menor (395 x 560: 84 → 78 pt de largura) e a da mesa compacta, de 8% a 10% menor; o teste mantém o mínimo de 40 pt no celular pequeno.
+
 ## Desempenho
 
 Gargalos encontrados e corrigidos (outubro/2026):
@@ -199,6 +217,7 @@ Gargalos encontrados e corrigidos (outubro/2026):
 | Selecionar carta, enviar jogada ou mostrar erro redesenhava a mesa e o placar | `TableBoard`, `ScoreBar` e `PlayerHud` com `memo`; `leaveTable` estável |
 | Verso da carta de 1024 x 1536 (2,2 MB) decodificado em até ~25 imagens durante a distribuição | `assets/cards/back.png`, 400 x 600 (0,35 MB) |
 | Canal Realtime reaproveitado ao remontar a tela (erro e assinatura perdida) | Nome de canal único por montagem |
+| Mesa com materiais realistas sem custo por quadro | Tampo em SVG estático com `memo` (redesenha só quando o tamanho muda), textura de 20 KB, nenhum filtro de desfoque; a seleção da carta anima na thread de UI (Reanimated) |
 
 A versão das bibliotecas de animação é a que o Expo 57 espera (`react-native-reanimated` 4.5.1, `react-native-worklets` 0.10.1; `npx expo install --check` sem pendências), e o `babel-preset-expo` já inclui o plugin de worklets: não há `babel.config.js` a configurar.
 

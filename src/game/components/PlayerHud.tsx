@@ -3,7 +3,8 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import Animated, { ZoomIn } from 'react-native-reanimated';
 import type { MatchPlayer, PublicGameState, Seat } from '../../contracts/types';
 import { CARD_BACK } from '../../ui/PlayingCard';
-import { colors, font, radius, space } from '../../ui/theme';
+import { FeltPanel } from '../../ui/TableSurface';
+import { colors, font, radius, shadow, space } from '../../ui/theme';
 import { seatSummaries, seatTeam, teamLabel, type SeatSummary } from '../describe';
 import type { DealAnimation } from '../useDealAnimation';
 import { ManilhaBadge, ViraCard } from './ViraCard';
@@ -39,7 +40,7 @@ export const PlayerHud = memo(function PlayerHud({ state, players, mySeat, deal,
   ];
 
   return (
-    <View style={styles.wrap}>
+    <FeltPanel style={styles.wrap}>
       <View style={styles.viraRow}>
         <View style={{ width: VIRA_W, height: VIRA_H }}>
           <ViraCard rect={{ x: 0, y: 0, w: VIRA_W, h: VIRA_H }} vira={state.vira} manilhaRank={state.manilhaRank} phase={deal.phase} />
@@ -65,7 +66,7 @@ export const PlayerHud = memo(function PlayerHud({ state, players, mySeat, deal,
           ))}
         </View>
       ))}
-    </View>
+    </FeltPanel>
   );
 });
 
@@ -107,18 +108,9 @@ function SeatPill({ seat, teamText, bubble, showCards }: { seat: SeatSummary; te
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: space.sm,
-    backgroundColor: colors.feltLight,
-    borderRadius: radius.lg,
-    borderWidth: 3,
-    borderColor: '#0F3322',
-    padding: space.sm,
-  },
+  wrap: { flex: 1, justifyContent: 'center', gap: space.sm },
   viraRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  hint: { flex: 1, color: colors.feltText, fontSize: font.small - 2, fontWeight: '600' },
+  hint: { flex: 1, color: colors.textMuted, fontSize: font.small - 2, fontWeight: '600' },
   row: { flexDirection: 'row', gap: space.sm },
   pill: {
     flex: 1,
@@ -126,26 +118,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: radius.sm,
-    backgroundColor: '#00000059',
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    backgroundColor: '#0B0B0DE0',
     overflow: 'hidden',
   },
-  pillTurn: { backgroundColor: colors.gold },
-  teamBar: { width: 5, alignSelf: 'stretch' },
+  pillTurn: { backgroundColor: '#1E1A12F2', borderColor: colors.gold },
+  teamBar: { width: 4, alignSelf: 'stretch' },
   body: { flex: 1, paddingHorizontal: 8, paddingVertical: 4 },
-  name: { color: colors.paper, fontSize: font.body - 1, fontWeight: '800' },
-  dark: { color: colors.ink },
+  name: { color: colors.text, fontSize: font.body - 1, fontWeight: '800' },
+  dark: { color: colors.goldSoft },
   sub: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  team: { color: colors.feltText, fontSize: font.small - 2, fontWeight: '600', flexShrink: 1 },
+  team: { color: colors.textMuted, fontSize: font.small - 2, fontWeight: '600', flexShrink: 1 },
   backs: { flexDirection: 'row', gap: 2 },
   back: { width: 10, height: 14.5, borderRadius: 2 },
+  // Balão no estilo do logo: creme, contorno quase preto e vermelho.
   bubble: {
-    backgroundColor: colors.paper,
+    backgroundColor: colors.cream,
     borderRadius: radius.md,
     borderWidth: 2,
     borderColor: colors.ink,
     paddingHorizontal: 6,
     paddingVertical: 2,
     marginRight: 6,
+    boxShadow: shadow.card,
   },
   bubbleText: { color: colors.red, fontSize: font.small, fontWeight: '900' },
 });

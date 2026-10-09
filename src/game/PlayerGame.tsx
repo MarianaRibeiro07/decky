@@ -135,6 +135,6 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.felt },
+  screen: { flex: 1, backgroundColor: colors.bg },
   top: { flex: 1, paddingHorizontal: space.sm, paddingBottom: space.sm, gap: space.xs },
 });

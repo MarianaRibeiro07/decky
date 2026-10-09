@@ -9,8 +9,10 @@ import { changeSeat, leaveRoom, setHostMode, setReady } from '../../src/rooms/ap
 import { useRoom } from '../../src/rooms/useRoom';
 import { Button } from '../../src/ui/Button';
 import { Notice } from '../../src/ui/Notice';
+import { Panel } from '../../src/ui/Panel';
 import { Screen } from '../../src/ui/Screen';
-import { colors, font, radius, space, TOUCH_MIN } from '../../src/ui/theme';
+import { FeltPanel } from '../../src/ui/TableSurface';
+import { colors, font, fonts, radius, space, TOUCH_MIN } from '../../src/ui/theme';
 
 // Grade em volta da mesa: parceiros ficam na diagonal (1 e 3, 2 e 4).
 const GRID: Seat[][] = [
@@ -75,17 +77,18 @@ export default function Lobby() {
 
   return (
     <Screen>
-      <View style={styles.codeBox}>
-        <Text style={styles.codeLabel}>Código da sala</Text>
+      <Panel tone="accent" style={styles.codeBox}>
+        <Text style={styles.codeLabel}>CÓDIGO DA SALA</Text>
         <Text style={styles.code} accessibilityLabel={`Código ${code?.split('').join(' ')}`} selectable>
           {code}
         </Text>
         <Button
           label="Compartilhar código"
-          variant="secondary"
+          variant="dark"
+          size="compact"
           onPress={() => Share.share({ message: `Vem jogar truco no Decky! Código da sala: ${code}` })}
         />
-      </View>
+      </Panel>
 
       {connection === 'reconnecting' ? <Notice kind="info" message="Reconectando..." /> : null}
 
@@ -99,27 +102,28 @@ export default function Lobby() {
         />
       ) : null}
 
-      <Text style={styles.teams}>Dupla A: lugares 1 e 3 · Dupla B: lugares 2 e 4</Text>
-
-      <View style={styles.grid}>
-        {GRID.map((row, i) => (
-          <View key={i} style={styles.row}>
-            {row.map((seat) => (
-              <SeatBox
-                key={seat}
-                seat={seat}
-                player={seats.find((s) => s.seat === seat)}
-                isMe={me?.seat === seat}
-                hostId={room?.hostUserId}
-                disabled={!!busy}
-                // A mesa não senta: para ela, lugar livre só mostra que falta jogador.
-                canSit={!!me}
-                onSit={() => room && run(`seat-${seat}`, () => changeSeat(room.id, seat))}
-              />
-            ))}
-          </View>
-        ))}
-      </View>
+      <FeltPanel>
+        <Text style={styles.teams}>Dupla A: lugares 1 e 3 · Dupla B: lugares 2 e 4</Text>
+        <View style={styles.grid}>
+          {GRID.map((row, i) => (
+            <View key={i} style={styles.row}>
+              {row.map((seat) => (
+                <SeatBox
+                  key={seat}
+                  seat={seat}
+                  player={seats.find((s) => s.seat === seat)}
+                  isMe={me?.seat === seat}
+                  hostId={room?.hostUserId}
+                  disabled={!!busy}
+                  // A mesa não senta: para ela, lugar livre só mostra que falta jogador.
+                  canSit={!!me}
+                  onSit={() => room && run(`seat-${seat}`, () => changeSeat(room.id, seat))}
+                />
+              ))}
+            </View>
+          ))}
+        </View>
+      </FeltPanel>
 
       <Notice kind="error" message={error} />
 
@@ -151,7 +155,7 @@ export default function Lobby() {
         </Text>
       )}
 
-      <Button label="Sair da sala" variant="secondary" onPress={handleLeave} loading={busy === 'leave'} />
+      <Button label="Sair da sala" variant="ghost" onPress={handleLeave} loading={busy === 'leave'} />
     </Screen>
   );
 }
@@ -181,20 +185,23 @@ function ModeBox({ mode, isHost, busy, disabled, onSwitch }: ModeBoxProps) {
     : '4 celulares: cada um mostra a mesa em cima e a própria mão embaixo.';
 
   return (
-    <View style={[styles.modeBox, table && styles.modeBoxTable]} accessible={!isHost} accessibilityLabel={`${title}. ${description}`}>
-      <Text style={[styles.modeTitle, table && styles.modeTitleTable]}>{title}</Text>
-      <Text style={[styles.modeText, table && styles.modeTextTable]}>{description}</Text>
+    <Panel tone={table ? 'accent' : 'default'}>
+      <View accessible={!isHost} accessibilityLabel={`${title}. ${description}`} style={styles.modeTexts}>
+        <Text style={styles.modeKicker}>{table ? '◎  MODO MESA · 5 APARELHOS' : '♠  MODO JOGADOR · 4 APARELHOS'}</Text>
+        <Text style={[styles.modeTitle, table && styles.modeTitleTable]}>{title}</Text>
+        <Text style={styles.modeText}>{description}</Text>
+      </View>
       {isHost ? (
         <Button
           label={table ? 'Trocar: quero jogar' : 'Trocar: este celular será a mesa'}
-          variant={table ? 'gold' : 'secondary'}
+          variant={table ? 'secondary' : 'gold'}
           size="compact"
           loading={busy}
           disabled={disabled}
           onPress={() => onSwitch(table ? 'player' : 'table')}
         />
       ) : null}
-    </View>
+    </Panel>
   );
 }
 
@@ -216,7 +223,7 @@ function SeatBox({ seat, player, isMe, hostId, disabled, canSit, onSit }: SeatBo
   if (!player) {
     return (
       <Pressable
-        style={({ pressed }) => [styles.seat, styles.seatFree, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [styles.seat, styles.seatFree, pressed && styles.seatPressed]}
         onPress={onSit}
         disabled={disabled || !canSit}
         accessibilityRole="button"
@@ -231,7 +238,7 @@ function SeatBox({ seat, player, isMe, hostId, disabled, canSit, onSit }: SeatBo
 
   return (
     <View
-      style={[styles.seat, { borderColor: teamColor }, isMe && styles.seatMe]}
+      style={[styles.seat, { borderLeftColor: teamColor }, isMe && styles.seatMe]}
       accessible
       accessibilityLabel={`${header}, ${player.displayName}${isMe ? ', você' : ''}, ${player.ready ? 'pronto' : 'aguardando'}`}
     >
@@ -241,7 +248,7 @@ function SeatBox({ seat, player, isMe, hostId, disabled, canSit, onSit }: SeatBo
         {isMe ? ' (você)' : ''}
       </Text>
       {player.userId === hostId ? <Text style={styles.host}>Dono da sala</Text> : null}
-      <Text style={[styles.ready, { color: player.ready ? colors.success : colors.muted }]}>
+      <Text style={[styles.ready, { color: player.ready ? colors.success : colors.textFaint }]}>
         {player.ready ? '✓ Pronto' : '… Aguardando'}
       </Text>
     </View>
@@ -249,41 +256,43 @@ function SeatBox({ seat, player, isMe, hostId, disabled, canSit, onSit }: SeatBo
 }
 
 const styles = StyleSheet.create({
-  codeBox: {
-    backgroundColor: colors.ink,
-    borderRadius: radius.lg,
-    padding: space.md,
-    gap: space.sm,
-    alignItems: 'stretch',
-  },
-  codeLabel: { color: colors.feltText, fontSize: font.body, textAlign: 'center' },
-  code: { color: colors.paper, fontSize: font.huge + 6, fontWeight: '900', letterSpacing: 8, textAlign: 'center' },
-  teams: { fontSize: font.small + 1, color: colors.muted, textAlign: 'center' },
-  modeBox: { borderRadius: radius.md, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.paper, padding: space.md, gap: space.xs },
-  modeBoxTable: { backgroundColor: colors.felt, borderColor: colors.felt },
-  modeTitle: { fontSize: font.body, fontWeight: '900', color: colors.ink },
-  modeTitleTable: { color: colors.gold },
-  modeText: { fontSize: font.small, color: colors.muted },
-  modeTextTable: { color: colors.feltText },
-  grid: { gap: space.sm, backgroundColor: colors.felt, borderRadius: radius.lg, padding: space.sm },
+  codeBox: { alignItems: 'stretch' },
+  codeLabel: { color: colors.textMuted, fontSize: font.tiny, fontWeight: '700', letterSpacing: 2, textAlign: 'center' },
+  code: { color: colors.text, fontSize: font.huge + 4, fontWeight: '800', letterSpacing: 10, textAlign: 'center' },
+  teams: { fontSize: font.small - 1, color: colors.textMuted, textAlign: 'center', marginBottom: space.sm },
+  modeTexts: { gap: space.xs },
+  modeKicker: { fontSize: font.tiny, fontWeight: '700', letterSpacing: 1.4, color: colors.textFaint },
+  modeTitle: { fontFamily: fonts.display, fontSize: font.large - 2, lineHeight: 28, color: colors.text },
+  modeTitleTable: { color: colors.goldSoft },
+  modeText: { fontSize: font.small, lineHeight: 21, color: colors.textMuted },
+  grid: { gap: space.sm },
   row: { flexDirection: 'row', gap: space.sm },
   seat: {
     flex: 1,
-    minHeight: TOUCH_MIN * 2.4,
-    backgroundColor: colors.paper,
+    minHeight: TOUCH_MIN * 2.3,
+    backgroundColor: '#0D0E10E6',
     borderRadius: radius.md,
-    borderWidth: 3,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    borderLeftWidth: 4,
     padding: space.sm,
     justifyContent: 'center',
     gap: 2,
   },
-  seatFree: { borderStyle: 'dashed', borderColor: colors.border, backgroundColor: colors.cream, alignItems: 'center' },
-  seatMe: { backgroundColor: '#FFF7DC' },
-  seatHeader: { fontSize: font.small, fontWeight: '800' },
-  name: { fontSize: font.large, fontWeight: '800', color: colors.ink },
-  host: { fontSize: font.small, color: colors.muted },
-  ready: { fontSize: font.body, fontWeight: '700' },
-  free: { fontSize: font.large, fontWeight: '700', color: colors.muted },
-  freeHint: { fontSize: font.small, color: colors.muted },
-  waiting: { fontSize: font.body, color: colors.muted, textAlign: 'center' },
+  seatFree: {
+    borderStyle: 'dashed',
+    borderLeftWidth: 1,
+    borderColor: colors.metalDark,
+    backgroundColor: '#00000040',
+    alignItems: 'center',
+  },
+  seatPressed: { backgroundColor: '#FFFFFF14' },
+  seatMe: { borderColor: colors.gold, backgroundColor: '#1E1A12F0' },
+  seatHeader: { fontSize: font.small - 2, fontWeight: '800', letterSpacing: 0.3 },
+  name: { fontSize: font.large - 2, fontWeight: '800', color: colors.text },
+  host: { fontSize: font.small - 2, color: colors.gold },
+  ready: { fontSize: font.body - 2, fontWeight: '700' },
+  free: { fontSize: font.large - 2, fontWeight: '700', color: colors.textMuted },
+  freeHint: { fontSize: font.small - 2, color: colors.textFaint },
+  waiting: { fontSize: font.body - 1, color: colors.textMuted, textAlign: 'center' },
 });

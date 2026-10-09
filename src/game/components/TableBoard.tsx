@@ -4,7 +4,9 @@ import Animated, { FadeInDown, FadeInLeft, FadeInRight, FadeInUp, LayoutAnimatio
 import { resolveTrick } from '../../../supabase/functions/_shared/engine/strength.ts';
 import type { MatchPlayer, PublicGameState, Seat, TableCard } from '../../contracts/types';
 import { CARD_BACK, PlayingCard } from '../../ui/PlayingCard';
-import { colors, font, radius } from '../../ui/theme';
+import { surfaceMetrics } from '../../ui/shapes';
+import { TableSurface } from '../../ui/TableSurface';
+import { colors, font, radius, shadow } from '../../ui/theme';
 import type { DealAnimation } from '../useDealAnimation';
 import { cardsLeft, playedCardKey, seatTeam, tablePositions, teamLabel, type Side } from '../describe';
 import { tableGeometry, type Rect, type TableVariant } from '../geometry';
@@ -51,14 +53,23 @@ export const TableBoard = memo(function TableBoard(props: TableBoardProps) {
     if (!size || Math.abs(size.w - width) > 1 || Math.abs(size.h - height) > 1) setSize({ w: width, h: height });
   }
 
+  // O tampo (couro, trilho, feltro) é desenhado uma vez por tamanho; lugares e cartas ficam na área do feltro.
+  const surface = props.variant === 'large' ? 'table' : 'compact';
+  const content = size ? surfaceMetrics(size.w, size.h, surface).content : null;
+
   return (
-    <View style={styles.felt} onLayout={onLayout}>
-      {size ? (
-        // Ao abrir a tela ou reconectar, as cartas que já estavam na mesa aparecem paradas;
-        // só as jogadas que chegam depois entram voando.
-        <LayoutAnimationConfig skipEntering>
-          <Board {...props} width={size.w} height={size.h} />
-        </LayoutAnimationConfig>
+    <View style={styles.area} onLayout={onLayout}>
+      {size && content ? (
+        <>
+          <TableSurface width={size.w} height={size.h} variant={surface} />
+          <View style={[styles.abs, { left: content.x, top: content.y, width: content.w, height: content.h }]}>
+            {/* Ao abrir a tela ou reconectar, as cartas que já estavam na mesa aparecem paradas;
+                só as jogadas que chegam depois entram voando. */}
+            <LayoutAnimationConfig skipEntering>
+              <Board {...props} width={content.w} height={content.h} />
+            </LayoutAnimationConfig>
+          </View>
+        </>
       ) : null}
     </View>
   );
@@ -143,10 +154,10 @@ function Board({ state, players, bottomSeat, viewerSeat, deal, variant, bubble, 
   );
 }
 
-/** Baralho fechado no centro da mesa, com o verso do Decky. */
+/** Baralho fechado no centro da mesa, com o verso do Decky: um maço com espessura e sombra no feltro. */
 function DeckStack({ rect }: { rect: Rect }) {
   return (
-    <View style={[styles.abs, { left: rect.x, top: rect.y, width: rect.w, height: rect.h }]} accessible accessibilityLabel="Baralho">
+    <View style={[styles.abs, styles.deck, { left: rect.x, top: rect.y, width: rect.w, height: rect.h }]} accessible accessibilityLabel="Baralho">
       {[4, 2, 0].map((offset) => (
         <Image
           key={offset}
@@ -157,6 +168,9 @@ function DeckStack({ rect }: { rect: Rect }) {
     </View>
   );
 }
+
+// Cada lugar solta a carta com uma leve inclinação, como na mesa de verdade. Só gira: a carta não deforma.
+const TILT: Record<Side, string> = { bottom: '-2deg', right: '4deg', top: '2.5deg', left: '-4deg' };
 
 interface SlotProps {
   rect: Rect;
@@ -171,13 +185,17 @@ interface SlotProps {
 function PlayedSlot({ rect, side, played, dimmed, winner, waiting }: SlotProps) {
   const box = { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
   if (!played) {
+    // Marcação impressa no feltro; na vez do lugar, ganha o contorno dourado.
     return <View style={[styles.abs, styles.emptySlot, waiting && styles.emptySlotTurn, box]} />;
   }
   return (
     // Chave só da carta: quando a vaza fecha, a carta continua montada (esmaece no lugar) em vez de
     // remontar. Antes a chave mudava com a vaza, as três primeiras piscavam e a quarta nem entrava voando.
+    // A inclinação vai numa view interna: o `transform` do invólucro é da animação de entrada.
     <Animated.View key={playedCardKey(played)} entering={ENTERING[side]} style={[styles.abs, box]}>
-      <PlayingCard card={played.card} width={rect.w} dimmed={dimmed && !winner} highlighted={winner} />
+      <View style={{ transform: [{ rotate: TILT[side] }] }}>
+        <PlayingCard card={played.card} width={rect.w} dimmed={dimmed && !winner} highlighted={winner} elevation="table" />
+      </View>
       {winner ? (
         <Animated.View entering={ZoomIn.duration(220)} style={styles.winnerTag}>
           <Text style={styles.winnerText}>Venceu</Text>
@@ -205,35 +223,34 @@ function Bubble({ rect, side, text, large }: { rect: Rect; side: Side; text: str
 }
 
 const styles = StyleSheet.create({
-  felt: {
-    flex: 1,
-    backgroundColor: colors.feltLight,
-    borderRadius: radius.lg,
-    borderWidth: 3,
-    borderColor: '#0F3322',
-    overflow: 'hidden',
-  },
+  area: { flex: 1 },
   abs: { position: 'absolute' },
-  deckCard: { position: 'absolute', borderRadius: radius.sm, borderWidth: 1, borderColor: '#00000066' },
-  emptySlot: { borderRadius: radius.sm, borderWidth: 2, borderStyle: 'dashed', borderColor: '#FFFFFF33' },
-  emptySlotTurn: { borderColor: colors.gold, borderWidth: 3 },
+  deckCard: { position: 'absolute', borderRadius: radius.sm, borderWidth: 1, borderColor: '#00000088' },
+  deck: { borderRadius: radius.sm, boxShadow: shadow.card },
+  emptySlot: { borderRadius: radius.sm, borderWidth: 1, borderColor: '#FFFFFF1F', backgroundColor: '#00000014' },
+  emptySlotTurn: { borderColor: colors.gold, borderWidth: 2, boxShadow: shadow.turn },
   winnerTag: {
     position: 'absolute',
-    bottom: -8,
+    bottom: -9,
     alignSelf: 'center',
-    backgroundColor: colors.gold,
+    backgroundColor: colors.ink,
+    borderColor: colors.gold,
+    borderWidth: 1,
     borderRadius: radius.sm,
     paddingHorizontal: 6,
+    paddingVertical: 1,
   },
-  winnerText: { color: colors.ink, fontSize: 11, fontWeight: '900' },
+  winnerText: { color: colors.goldSoft, fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  // Balão no estilo do logo: creme, contorno quase preto e vermelho.
   bubble: {
     position: 'absolute',
-    backgroundColor: colors.paper,
+    backgroundColor: colors.cream,
     borderRadius: radius.md,
     borderWidth: 2,
     borderColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: shadow.card,
   },
   bubbleText: { color: colors.red, fontSize: font.body, fontWeight: '900' },
   bubbleTextLarge: { fontSize: font.large },
