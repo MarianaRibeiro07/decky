@@ -41,6 +41,8 @@ function Fixture() {
   const gameRef = useRef(game);
   gameRef.current = game;
   const [view, setView] = useState<View_>(1);
+  // Com mesa dedicada (5 aparelhos) o jogador vê só a mão e o essencial; sem ela, a mesa fica em cima.
+  const [withTable, setWithTable] = useState(true);
 
   const match: MatchView = {
     matchId,
@@ -48,7 +50,7 @@ function Fixture() {
     roomCode: null,
     revision: game.revision,
     state: game.state.public,
-    tableUserId: 'mesa',
+    tableUserId: withTable ? 'mesa' : null,
   };
 
   // Faz o papel do submit-action: confere a revisão e aplica a regra do motor.
@@ -70,7 +72,25 @@ function Fixture() {
       <View style={styles.bar}>
         <Text style={styles.badge}>FIXTURE LOCAL · sem servidor</Text>
         <View style={styles.tabs}>
-          {([1, 2, 3, 4, 'table'] as View_[]).map((v) => (
+          {[true, false].map((mode) => (
+            <Pressable
+              key={String(mode)}
+              onPress={() => {
+                setWithTable(mode);
+                if (!mode && view === 'table') setView(1);
+              }}
+              style={[styles.tab, withTable === mode && styles.tabOn]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: withTable === mode }}
+            >
+              <Text style={[styles.tabText, withTable === mode && styles.tabTextOn]}>
+                {mode ? 'Com mesa (5 aparelhos)' : 'Sem mesa (4 aparelhos)'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={styles.tabs}>
+          {((withTable ? [1, 2, 3, 4, 'table'] : [1, 2, 3, 4]) as View_[]).map((v) => (
             <Pressable
               key={String(v)}
               onPress={() => setView(v)}
@@ -88,7 +108,7 @@ function Fixture() {
           <TableGame match={match} players={PLAYERS} connection="online" />
         ) : (
           <PlayerGame
-            key={view}
+            key={`${view}-${withTable}`}
             match={match}
             hand={{ revision: game.revision, seat: view, cards: game.state.hands[view - 1] }}
             players={PLAYERS}

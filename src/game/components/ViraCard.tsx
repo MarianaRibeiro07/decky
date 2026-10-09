@@ -18,17 +18,38 @@ interface Props {
   phase: DealPhase;
 }
 
-/** A vira, que vira de face na etapa 'reveal' da distribuição. */
+/**
+ * A vira, que vira de face na etapa 'reveal' da distribuição.
+ * Fora do 'reveal' a carta é estática (verso ou face, conforme a fase). O giro só existe enquanto
+ * dura a etapa e começa sempre do verso: a vira nova nunca aparece aberta por um quadro antes da hora.
+ */
 export function ViraCard({ rect, vira, manilhaRank, phase }: Props) {
   const faceUp = phase === 'reveal' || phase === 'done';
-  // 0 = verso, 1 = face. Sem animação em andamento, já começa de face.
-  const flip = useSharedValue(faceUp ? 1 : 0);
+  const manilhaName = rankName(manilhaRank);
+
+  return (
+    <View
+      style={[styles.wrap, { left: rect.x, top: rect.y, width: rect.w, height: rect.h }]}
+      accessible
+      accessibilityLabel={faceUp ? `Vira: ${cardLabel(vira)}. Manilha: ${manilhaName}` : 'Vira ainda fechada'}
+    >
+      {phase === 'reveal' ? (
+        <ViraFlip key={`${vira.rank}_${vira.suit}`} vira={vira} width={rect.w} />
+      ) : (
+        <PlayingCard card={vira} faceDown={!faceUp} width={rect.w} />
+      )}
+    </View>
+  );
+}
+
+/** Giro de verso para face. Montado só durante o 'reveal'; ao desmontar, o Reanimated cancela a animação. */
+function ViraFlip({ vira, width }: { vira: Card; width: number }) {
+  // 0 = verso, 1 = face.
+  const flip = useSharedValue(0);
 
   useEffect(() => {
-    if (phase === 'reveal') flip.value = withTiming(1, { duration: DEAL_TIMING.reveal * 0.8, easing: Easing.inOut(Easing.cubic) });
-    else if (phase === 'done') flip.value = 1;
-    else flip.value = 0;
-  }, [phase, flip]);
+    flip.value = withTiming(1, { duration: DEAL_TIMING.reveal * 0.8, easing: Easing.inOut(Easing.cubic) });
+  }, [flip]);
 
   const backStyle = useAnimatedStyle(() => ({
     opacity: flip.value < 0.5 ? 1 : 0,
@@ -39,21 +60,15 @@ export function ViraCard({ rect, vira, manilhaRank, phase }: Props) {
     transform: [{ scaleX: Math.abs(Math.cos(flip.value * Math.PI)) }],
   }));
 
-  const manilhaName = rankName(manilhaRank);
-
   return (
-    <View
-      style={[styles.wrap, { left: rect.x, top: rect.y, width: rect.w, height: rect.h }]}
-      accessible
-      accessibilityLabel={faceUp ? `Vira: ${cardLabel(vira)}. Manilha: ${manilhaName}` : 'Vira ainda fechada'}
-    >
+    <>
       <Animated.View style={[StyleSheet.absoluteFill, backStyle]}>
-        <PlayingCard faceDown width={rect.w} />
+        <PlayingCard faceDown width={width} />
       </Animated.View>
       <Animated.View style={[StyleSheet.absoluteFill, faceStyle]}>
-        <PlayingCard card={vira} width={rect.w} />
+        <PlayingCard card={vira} width={width} />
       </Animated.View>
-    </View>
+    </>
   );
 }
 

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { MatchPlayer, PublicGameState, Team } from '../../contracts/types';
 import { colors, font, radius, space, TOUCH_MIN } from '../../ui/theme';
@@ -12,8 +13,8 @@ interface Props {
   onLeave: () => void;
 }
 
-/** Placar das duplas, valor da mão e vazas da mão atual. */
-export function ScoreBar({ state, viewerTeam, players, large, onLeave }: Props) {
+/** Placar das duplas, valor da mão e vazas da mão atual. Só redesenha quando o estado público muda. */
+export const ScoreBar = memo(function ScoreBar({ state, viewerTeam, players, large, onLeave }: Props) {
   // Para o jogador, "Nós" fica sempre à esquerda; na mesa, A à esquerda.
   const left: Team = viewerTeam ?? 'A';
   const right: Team = left === 'A' ? 'B' : 'A';
@@ -65,7 +66,7 @@ export function ScoreBar({ state, viewerTeam, players, large, onLeave }: Props) 
       </View>
     </View>
   );
-}
+});
 
 function TeamScore({ team, label, points, names, large }: { team: Team; label: string; points: number; names: string | null; large: boolean }) {
   return (

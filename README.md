@@ -13,7 +13,7 @@ Projeto da atividade de Desenvolvimento Mobile/Scrum do SENAI. Apresentação pr
 - Entrar por código, quatro posições fixas e duas duplas.
 - Início de partida pelo dono da sala, com distribuição de cartas feita **no servidor**.
 - Tela do jogador dividida: mesa pública em cima, mão privada embaixo, com seleção e confirmação da carta e controles de truco contextuais.
-- Mesa central (modo mesa): só informações públicas, em tela cheia, sem mão e sem poder jogar (garantido pelo servidor).
+- Mesa central (modo mesa): só informações públicas, em tela cheia, sem mão e sem poder jogar (garantido pelo servidor). Nesse modo os 4 celulares dos jogadores mostram só a própria mão, os controles e o essencial público; a mesa completa fica no aparelho da mesa.
 - Distribuição animada: as cartas saem do baralho até cada jogador, a vira é revelada e a manilha indicada; anima uma vez por mão e não se repete ao reconectar.
 - Truco Paulista completo: manilha variável, vazas, pedidos 3/6/9/12, placar automático até 12 pontos.
 - Histórico com CRUD de notas ligadas às partidas.
@@ -62,13 +62,13 @@ Para a demonstração, desligue **Confirm email** em Authentication > Providers 
 |---|---|
 | `tests/engine/` | Motor do truco: baralho, manilha, vazas, empates, truco 3/6/9/12, correr, mão de 11, 200 partidas aleatórias |
 | `tests/sql/` | Migrations reais num Postgres em memória (PGlite): salas, modo mesa, RLS, mãos privadas, idempotência, conflito de revisão, CRUD de notas e, em `flow.test.ts`, o código das Edge Functions jogando com 5 aparelhos (incluindo uma partida inteira até 12) |
-| `tests/app/` | REGEX de e-mail, senha e nome; textos da mesa; geometria sem sobreposição; distribuição (ordem, fases, uma vez por mão); controles de truco; papel do aparelho |
+| `tests/app/` | REGEX de e-mail, senha e nome; textos da mesa; geometria sem sobreposição; distribuição (ordem, fases calculadas no render, chegada das cartas, uma vez por mão); controles de truco; papel do aparelho e tela do jogador com mesa dedicada; leituras repetidas sem re-render; canais Realtime únicos |
 
 `npm run typecheck` confere os tipos do app e do motor. O projeto não tem lint configurado.
 
 ### Fixture visual (só desenvolvimento)
 
-Com `npx expo start`, a rota `/dev/preview` mostra a mesa com uma partida **simulada no próprio aparelho** pelo motor de regras (barra "FIXTURE LOCAL · sem servidor"), com botões para ver como cada lugar ou como a mesa. Serve para revisar layout e animação sem Supabase e sem 4 celulares. **Não é o multiplayer real** e não deve ser apresentada como tal. Em build de produção a rota só mostra "Indisponível".
+Com `npx expo start`, a rota `/dev/preview` mostra a mesa com uma partida **simulada no próprio aparelho** pelo motor de regras (barra "FIXTURE LOCAL · sem servidor"), com botões para ver como cada lugar ou como a mesa. Alterna entre "com mesa" (5 aparelhos) e "sem mesa" (4 aparelhos). Serve para revisar layout e animação sem Supabase e sem 4 celulares. **Não é o multiplayer real** e não deve ser apresentada como tal. Em build de produção a rota só mostra "Indisponível".
 
 ### Variáveis de ambiente
 

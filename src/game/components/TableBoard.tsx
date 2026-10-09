@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Image, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
-import Animated, { FadeInDown, FadeInLeft, FadeInRight, FadeInUp, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInLeft, FadeInRight, FadeInUp, LayoutAnimationConfig, ZoomIn } from 'react-native-reanimated';
 import { resolveTrick } from '../../../supabase/functions/_shared/engine/strength.ts';
 import type { MatchPlayer, PublicGameState, Seat, TableCard } from '../../contracts/types';
 import { CARD_BACK, PlayingCard } from '../../ui/PlayingCard';
 import { colors, font, radius } from '../../ui/theme';
 import type { DealAnimation } from '../useDealAnimation';
-import { cardsLeft, seatTeam, tablePositions, teamLabel, type Side } from '../describe';
+import { cardsLeft, playedCardKey, seatTeam, tablePositions, teamLabel, type Side } from '../describe';
 import { tableGeometry, type Rect, type TableVariant } from '../geometry';
 import { DealLayer } from './DealLayer';
 import { SeatChip } from './SeatChip';
@@ -37,10 +37,13 @@ export interface TableBoardProps {
 
 /**
  * A mesa pública: quatro lugares, cartas jogadas na posição de quem jogou, baralho, vira e manilha.
- * É a mesma para o jogador (metade de cima da tela) e para o celular dedicado à mesa; muda só a escala.
+ * Desenhada no celular dedicado à mesa e, quando não há mesa dedicada, na metade de cima do jogador.
  * Não recebe nem desenha mãos: só o que está em PublicGameState.
+ *
+ * `memo`: selecionar carta, enviar jogada ou mostrar erro mudam só a mão; a mesa redesenha apenas
+ * quando o estado público, a fase da distribuição ou a fala mudam.
  */
-export function TableBoard(props: TableBoardProps) {
+export const TableBoard = memo(function TableBoard(props: TableBoardProps) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
 
   function onLayout(e: LayoutChangeEvent) {
@@ -50,10 +53,16 @@ export function TableBoard(props: TableBoardProps) {
 
   return (
     <View style={styles.felt} onLayout={onLayout}>
-      {size ? <Board {...props} width={size.w} height={size.h} /> : null}
+      {size ? (
+        // Ao abrir a tela ou reconectar, as cartas que já estavam na mesa aparecem paradas;
+        // só as jogadas que chegam depois entram voando.
+        <LayoutAnimationConfig skipEntering>
+          <Board {...props} width={size.w} height={size.h} />
+        </LayoutAnimationConfig>
+      ) : null}
     </View>
   );
-}
+});
 
 function Board({ state, players, bottomSeat, viewerSeat, deal, variant, bubble, width, height }: TableBoardProps & { width: number; height: number }) {
   const g = tableGeometry(width, height, variant);
@@ -96,7 +105,6 @@ function Board({ state, players, bottomSeat, viewerSeat, deal, variant, bubble, 
             dimmed={showingLast}
             winner={winnerSeat === seat}
             waiting={isTurn}
-            animationKey={`${state.handNumber}-${state.trickResults.length}`}
           />
         );
       })}
@@ -158,20 +166,17 @@ interface SlotProps {
   winner: boolean;
   /** É a vez deste lugar: o espaço vazio pisca de leve. */
   waiting: boolean;
-  animationKey: string;
 }
 
-function PlayedSlot({ rect, side, played, dimmed, winner, waiting, animationKey }: SlotProps) {
+function PlayedSlot({ rect, side, played, dimmed, winner, waiting }: SlotProps) {
   const box = { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
   if (!played) {
     return <View style={[styles.abs, styles.emptySlot, waiting && styles.emptySlotTurn, box]} />;
   }
   return (
-    <Animated.View
-      key={`${animationKey}-${played.card.rank}${played.card.suit}-${dimmed ? 'd' : 'n'}`}
-      entering={dimmed ? undefined : ENTERING[side]}
-      style={[styles.abs, box]}
-    >
+    // Chave só da carta: quando a vaza fecha, a carta continua montada (esmaece no lugar) em vez de
+    // remontar. Antes a chave mudava com a vaza, as três primeiras piscavam e a quarta nem entrava voando.
+    <Animated.View key={playedCardKey(played)} entering={ENTERING[side]} style={[styles.abs, box]}>
       <PlayingCard card={played.card} width={rect.w} dimmed={dimmed && !winner} highlighted={winner} />
       {winner ? (
         <Animated.View entering={ZoomIn.duration(220)} style={styles.winnerTag}>

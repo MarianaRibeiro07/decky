@@ -85,6 +85,36 @@ export function dealPhaseAt(elapsed: number, intro: boolean): DealPhase {
 }
 
 /**
+ * Fase da distribuição no instante `now`. É calculada no próprio render, não num efeito:
+ * assim o primeiro quadro de uma mão nova já sai na fase certa, sem piscar a mão e a vira
+ * abertas antes de a animação começar.
+ */
+export function dealPhaseNow(run: DealRun | null, now: number): DealPhase {
+  return run ? dealPhaseAt(now - run.startedAt, run.intro) : 'done';
+}
+
+/** Instantes (Date.now) em que a fase muda; a tela só precisa redesenhar nesses momentos. */
+export function dealPhaseChanges(run: DealRun): number[] {
+  const b = dealBoundaries(run.intro);
+  return [b.dealing, b.reveal, b.done].map((at) => run.startedAt + at);
+}
+
+/** Instantes (Date.now) em que cada carta de `seat` pousa. */
+export function landingMoments(run: DealRun, dealerSeat: Seat, seat: Seat): number[] {
+  const start = run.startedAt + dealBoundaries(run.intro).dealing;
+  return landingTimes(dealerSeat, seat).map((t) => start + t);
+}
+
+/**
+ * Quantas cartas da própria mão já "chegaram": cada uma entra quando a carta voadora correspondente
+ * pousa. Sem animação, ou depois dela, todas (3).
+ */
+export function arrivedCards(run: DealRun | null, dealerSeat: Seat, seat: Seat, now: number): number {
+  if (!run) return 3;
+  return landingMoments(run, dealerSeat, seat).filter((at) => at <= now).length;
+}
+
+/**
  * Lembra quais distribuições este aparelho já animou.
  * Reconectar ou receber o mesmo estado de novo não repete a animação; entrar no meio de
  * uma mão (alguém já jogou) não anima. Remontar a tela durante a animação a retoma do ponto

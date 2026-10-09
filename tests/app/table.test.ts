@@ -133,10 +133,10 @@ describe('papel do aparelho na partida', () => {
   const players = [1, 2, 3, 4].map((seat) => ({ seat: seat as Seat, team: seat % 2 ? 'A' : 'B', userId: `u${seat}`, displayName: `P${seat}` })) as any;
 
   it('jogador da partida joga; a mesa registrada só assiste; o resto não vê', () => {
-    expect(resolveRole('u2', match('mesa'), players, null)).toBe('player');
-    expect(resolveRole('mesa', match('mesa'), players, null)).toBe('table');
-    expect(resolveRole('mesa', match(null), players, null)).toBeNull();
-    expect(resolveRole(null, match(null), players, null)).toBeNull();
+    expect(resolveRole('u2', match('mesa'), players)).toBe('player');
+    expect(resolveRole('mesa', match('mesa'), players)).toBe('table');
+    expect(resolveRole('mesa', match(null), players)).toBeNull();
+    expect(resolveRole(null, match(null), players)).toBeNull();
   });
 });
 

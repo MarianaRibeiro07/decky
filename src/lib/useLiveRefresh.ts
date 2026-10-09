@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
+import { channelTopic } from './channelTopic';
 import { supabase } from './supabase';
 
 export type ConnectionStatus = 'connecting' | 'online' | 'reconnecting';
@@ -59,7 +60,7 @@ export function useLiveRefresh(
     if (!key) return;
     refreshNow();
 
-    let channel = supabase.channel(`live:${key}`);
+    let channel = supabase.channel(channelTopic(key));
     for (const watch of JSON.parse(watchKey) as Watch[]) {
       channel = channel.on(
         'postgres_changes',

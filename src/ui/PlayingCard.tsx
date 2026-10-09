@@ -12,8 +12,12 @@ export function cardLabel(card: Card): string {
 }
 
 const RATIO = 726 / 500;
-/** Verso das cartas do Decky (baralho fechado, cartas dos outros jogadores e distribuição). */
-export const CARD_BACK = require('../../assets/Fundo-Carta-Vermelho.png');
+/**
+ * Verso das cartas do Decky (baralho fechado, cartas dos outros jogadores e distribuição).
+ * É `assets/Fundo-Carta-Vermelho.png` reduzido para 400×600: o original (1024×1536, 2,2 MB) era
+ * decodificado em até ~25 imagens ao mesmo tempo durante a distribuição e travava os aparelhos.
+ */
+export const CARD_BACK = require('../../assets/cards/back.png');
 const BACK = CARD_BACK;
 
 interface Props {

@@ -1,39 +1,38 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import type { PublicGameState } from '../contracts/types';
-import { dealBoundaries, dealKey, dealPhaseAt, dealTracker, type DealPhase, type DealRun } from './deal';
+import { useRerenderAt } from '../lib/useRerenderAt';
+import { dealKey, dealPhaseChanges, dealPhaseNow, dealTracker, type DealPhase, type DealRun } from './deal';
 
 export interface DealAnimation {
   phase: DealPhase;
-  /** Execução em andamento (para os voos retomarem do ponto certo); null quando não há animação. */
+  /** Execução desta mão (para os voos retomarem do ponto certo); null quando a mão não anima. */
   run: DealRun | null;
 }
+
+const NO_MOMENTS: number[] = [];
 
 /**
  * Fase visual da distribuição da mão atual. Começa quando chega um `handNumber` novo
  * ainda sem cartas jogadas e termina por tempo. Nenhuma regra depende disso: as cartas
  * já estão gravadas no servidor e a mão pode ser jogada mesmo que a animação não rode.
+ *
+ * A fase sai do relógio no próprio render (não de um efeito), então a mão nova nunca
+ * aparece aberta por um quadro antes de a animação começar.
  */
 export function useDealAnimation(matchId: string | undefined, state: PublicGameState | undefined): DealAnimation {
-  const [anim, setAnim] = useState<DealAnimation>({ phase: 'done', run: null });
   const handNumber = state?.handNumber;
 
-  useEffect(() => {
-    if (!matchId || !state || handNumber === undefined) return;
-    const run = dealTracker.start(dealKey(matchId, handNumber), state, Date.now());
-    if (!run) {
-      setAnim({ phase: 'done', run: null });
-      return;
-    }
+  // O tracker guarda a primeira decisão de cada mão: registrar no render é idempotente
+  // (render repetido, Realtime duplicado ou remontagem devolvem a mesma execução).
+  const run = useMemo(
+    () => (matchId && state && handNumber !== undefined ? dealTracker.start(dealKey(matchId, handNumber), state, Date.now()) : null),
+    // Só a troca de mão decide a animação; outras mudanças de estado não a reiniciam.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [matchId, handNumber],
+  );
 
-    const elapsed = Date.now() - run.startedAt;
-    const b = dealBoundaries(run.intro);
-    setAnim({ phase: dealPhaseAt(elapsed, run.intro), run });
-    const timers = [b.dealing, b.reveal, b.done]
-      .filter((at) => at > elapsed)
-      .map((at) => setTimeout(() => setAnim({ phase: dealPhaseAt(at, run.intro), run }), at - elapsed));
-    return () => timers.forEach(clearTimeout);
-    // Só a troca de mão dispara a animação; outras mudanças de estado não a reiniciam.
-  }, [matchId, handNumber]);
+  useRerenderAt(run ? dealPhaseChanges(run) : NO_MOMENTS);
+  const phase = dealPhaseNow(run, Date.now());
 
-  return anim;
+  return useMemo(() => ({ phase, run }), [phase, run]);
 }

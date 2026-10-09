@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getLegalActions } from '../../supabase/functions/_shared/engine/game.ts';
@@ -11,10 +11,12 @@ import { colors, space } from '../ui/theme';
 import { submitAction } from './api';
 import { FinishedOverlay } from './components/FinishedOverlay';
 import { HandPanel } from './components/HandPanel';
+import { PlayerHud } from './components/PlayerHud';
 import { ScoreBar } from './components/ScoreBar';
 import { ConnectionBanner, StatusBanner } from './components/StatusBanner';
 import { TableBoard } from './components/TableBoard';
 import { seatTeam } from './describe';
+import { playerLayout } from './role';
 import { statusText } from './status';
 import { useDealAnimation } from './useDealAnimation';
 import { useEventBubble } from './useEventBubble';
@@ -30,7 +32,11 @@ interface Props {
   submit?: (matchId: string, action: GameAction, expectedRevision: number) => Promise<GameResult>;
 }
 
-/** Modo jogador: mesa pública em cima, mão privada e controles embaixo. */
+/**
+ * Tela do jogador. A mão privada e os controles ficam sempre embaixo; o que vai em cima depende do modo:
+ * - sem mesa dedicada: a mesa pública completa (TableBoard);
+ * - com mesa dedicada: só o essencial público (PlayerHud). A mesa completa fica no aparelho da mesa.
+ */
 export function PlayerGame({ match, hand, players, mySeat, connection, refresh, submit = submitAction }: Props) {
   useScreenAwake();
   const insets = useSafeAreaInsets();
@@ -42,8 +48,9 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
   // Trava síncrona: dois toques rápidos não chegam a enviar duas ações.
   const sending = useRef(false);
 
+  const layout = playerLayout(match);
   const myTeam = seatTeam(mySeat);
-  const legal = getLegalActions(state, mySeat);
+  const legal = useMemo(() => getLegalActions(state, mySeat), [state, mySeat]);
   const nameOf = (seat: Seat) =>
     seat === mySeat ? 'Você' : players.find((p) => p.seat === seat)?.displayName ?? `Lugar ${seat}`;
 
@@ -69,27 +76,32 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
     }
   }
 
-  function leaveTable() {
+  // Estável: o placar (memo) não redesenha a cada toque na mão.
+  const leaveTable = useCallback(() => {
     Alert.alert('Sair da mesa?', 'A partida continua. Para voltar, abra a sala de novo pelo código.', [
       { text: 'Ficar', style: 'cancel' },
       { text: 'Sair', onPress: () => router.replace('/') },
     ]);
-  }
+  }, []);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
       <View style={styles.top}>
         <ScoreBar state={state} viewerTeam={myTeam} players={players} large={false} onLeave={leaveTable} />
         <ConnectionBanner status={connection} />
-        <TableBoard
-          state={state}
-          players={players}
-          bottomSeat={mySeat}
-          viewerSeat={mySeat}
-          deal={deal}
-          variant="compact"
-          bubble={bubble}
-        />
+        {layout === 'split' ? (
+          <TableBoard
+            state={state}
+            players={players}
+            bottomSeat={mySeat}
+            viewerSeat={mySeat}
+            deal={deal}
+            variant="compact"
+            bubble={bubble}
+          />
+        ) : (
+          <PlayerHud state={state} players={players} mySeat={mySeat} deal={deal} bubble={bubble} />
+        )}
         <StatusBanner
           status={statusText({ state, viewerSeat: mySeat, nameOf, canRespond: legal.respondTruco, phase: deal.phase })}
           large={false}
@@ -106,6 +118,7 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
         error={error}
         onAct={act}
         bottomInset={insets.bottom}
+        size={layout === 'hand' ? 'large' : 'normal'}
       />
 
       {state.status === 'finished' ? (

@@ -1,6 +1,6 @@
 // Textos curtos da mesa. Para um jogador, do ponto de vista dele ("Nós" e "Eles");
 // para a mesa central (viewerTeam = null), neutros ("Dupla A" e "Dupla B").
-import type { HandSummary, PublicEvent, PublicGameState, Seat, Team, TrickResult } from '../contracts/types';
+import type { HandSummary, PublicEvent, PublicGameState, Seat, TableCard, Team, TrickResult } from '../contracts/types';
 
 const TRUCO_NAMES: Record<number, string> = { 3: 'TRUCO', 6: 'SEIS', 9: 'NOVE', 12: 'DOZE' };
 
@@ -89,4 +89,50 @@ export function tablePositions(bottomSeat: Seat): Record<Side, Seat> {
 export function cardsLeft(seat: Seat, tricksDone: number, tableSeats: Seat[], finished: boolean): number {
   if (finished) return 0;
   return 3 - tricksDone - (tableSeats.includes(seat) ? 1 : 0);
+}
+
+/**
+ * Identidade de uma carta na mesa. Só depende da carta (única dentro da mão), não da vaza nem do
+ * esmaecimento: quando a vaza fecha e a carta passa de `tableCards` para `lastTrick`, o componente
+ * continua o mesmo. Assim as três primeiras não "piscam" e a quarta ainda entra voando.
+ */
+export function playedCardKey({ card }: TableCard): string {
+  return `${card.rank}_${card.suit}`;
+}
+
+export interface SeatSummary {
+  seat: Seat;
+  name: string;
+  team: Team;
+  isTurn: boolean;
+  /** Já jogou nesta vaza (a carta em si aparece na mesa central). */
+  played: boolean;
+  /** Quantas cartas ainda tem na mão (contagem pública, nunca quais). */
+  cardsLeft: number;
+}
+
+/**
+ * Resumo público dos quatro lugares para a tela do jogador com mesa dedicada, começando por quem olha
+ * e seguindo a ordem da mesa. Não carrega carta nenhuma: só nome, dupla, vez e contagens.
+ */
+export function seatSummaries(
+  state: PublicGameState,
+  viewerSeat: Seat,
+  nameOf: (seat: Seat) => string,
+  dealing: boolean,
+): SeatSummary[] {
+  const playing = state.status === 'playing';
+  const tableSeats = state.tableCards.map((c) => c.seat);
+  const positions = tablePositions(viewerSeat);
+  return (['bottom', 'right', 'top', 'left'] as Side[]).map((side) => {
+    const seat = positions[side];
+    return {
+      seat,
+      name: nameOf(seat),
+      team: seatTeam(seat),
+      isTurn: playing && !dealing && !state.truco && state.currentTurnSeat === seat,
+      played: tableSeats.includes(seat),
+      cardsLeft: cardsLeft(seat, state.trickResults.length, tableSeats, !playing),
+    };
+  });
 }

@@ -72,6 +72,7 @@ Cada história tem seus critérios em [PRODUCT_BACKLOG.md](PRODUCT_BACKLOG.md). 
 - [ ] "Criar sala" > "Este celular será a mesa": o dono não ocupa lugar e os 4 lugares ficam livres.
 - [ ] Os 4 jogadores entram e marcam pronto; a mesa inicia a partida.
 - [ ] A mesa mostra placar das duplas com nomes, vez, vira, manilha, cartas jogadas e versos restantes, e nenhuma carta de mão.
+- [ ] Os 4 celulares dos jogadores **não** mostram a mesa completa: só a própria mão (cartas maiores), os controles, placar, vez, vira/manilha, quem já jogou na vaza e as falas de truco. As cartas jogadas aparecem só na mesa central.
 - [ ] Com o token da mesa, `get_my_hand` devolve vazio e `submit-action` devolve `not_member`.
 - [ ] Fechar o app da mesa não interrompe a partida nos 4 celulares; reabrir mostra o estado atual.
 - [ ] No lobby, o dono troca entre "quero jogar" e "este celular será a mesa".
@@ -80,7 +81,10 @@ Cada história tem seus critérios em [PRODUCT_BACKLOG.md](PRODUCT_BACKLOG.md). 
 
 - [ ] Ao iniciar, as cartas saem do baralho para os 4 lugares; cada jogador vê as 3 cartas chegando; a vira é revelada e a manilha indicada.
 - [ ] A partir da 2ª mão, a última vaza aparece por um instante antes da nova distribuição.
-- [ ] Reabrir o app no meio da mão não repete a distribuição.
+- [ ] Reabrir o app no meio da mão não repete a distribuição, nem faz as cartas da mesa entrarem voando de novo.
+- [ ] Na troca de mão, a mão nova e a vira nunca aparecem abertas por um instante antes da distribuição.
+- [ ] Quando a vaza fecha, as três primeiras cartas esmaecem no lugar (sem piscar) e a quarta entra voando.
+- [ ] Sair da partida e voltar logo em seguida (pela sala) não mostra erro de canal ("cannot add postgres_changes callbacks").
 - [ ] Tocar numa carta a seleciona; "Jogar" confirma; a carta sai da mão e aparece na posição de quem jogou nos outros aparelhos.
 - [ ] Toque duplo rápido em "Jogar" envia uma jogada só.
 - [ ] Pedido de truco: a dupla adversária vê Aceitar, Correr e Pedir SEIS; o parceiro de quem pediu só aguarda; a mesa mostra o pedido.

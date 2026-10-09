@@ -3,13 +3,17 @@ import { newMatch, seededRng } from '../../supabase/functions/_shared/engine/ind
 import type { PublicGameState } from '../../src/contracts/types';
 import {
   DEAL_TIMING,
+  arrivedCards,
   createDealTracker,
   dealBoundaries,
   dealKey,
   dealOrder,
   dealPhaseAt,
+  dealPhaseChanges,
+  dealPhaseNow,
   dealingDuration,
   isFreshDeal,
+  landingMoments,
   landingTimes,
 } from '../../src/game/deal';
 
@@ -83,5 +87,48 @@ describe('animar uma vez por mão (reconexão e eventos repetidos)', () => {
 
   it('partida encerrada não anima', () => {
     expect(isFreshDeal({ ...fresh(), status: 'finished' })).toBe(false);
+  });
+});
+
+describe('sem quadro piscando na troca de mão', () => {
+  it('a fase sai do relógio no mesmo render em que a mão nova chega (nunca começa em "done")', () => {
+    const tracker = createDealTracker();
+    const hand2: PublicGameState = { ...fresh(), handNumber: 2, lastTrick: { cards: [], result: 'B' } };
+    const run = tracker.start(dealKey('m1', 2), hand2, 10_000);
+    // Primeiro render com a mão nova: já está na pausa, com a mão e a vira fechadas.
+    expect(dealPhaseNow(run, 10_000)).toBe('intro');
+    expect(arrivedCards(run, hand2.dealerSeat, 1, 10_000)).toBe(0);
+    expect(dealPhaseNow(null, 10_000)).toBe('done');
+  });
+
+  it('os redesenhos agendados caem exatamente nas trocas de fase', () => {
+    const run = { startedAt: 1000, intro: true };
+    const b = dealBoundaries(true);
+    expect(dealPhaseChanges(run)).toEqual([1000 + b.dealing, 1000 + b.reveal, 1000 + b.done]);
+    for (const at of dealPhaseChanges(run)) expect(dealPhaseNow(run, at)).not.toBe(dealPhaseNow(run, at - 1));
+  });
+
+  it('cada carta da própria mão chega quando a carta voadora pousa; no fim, todas', () => {
+    const run = { startedAt: 0, intro: false };
+    const moments = landingMoments(run, 4, 1);
+    expect(moments).toHaveLength(3);
+    expect(arrivedCards(run, 4, 1, moments[0] - 1)).toBe(0);
+    expect(arrivedCards(run, 4, 1, moments[0])).toBe(1);
+    expect(arrivedCards(run, 4, 1, moments[1])).toBe(2);
+    expect(arrivedCards(run, 4, 1, moments[2])).toBe(3);
+    expect(arrivedCards(run, 4, 1, dealBoundaries(false).done)).toBe(3);
+    // Sem animação (reconexão no meio da mão): as três já estão lá.
+    expect(arrivedCards(null, 4, 1, 0)).toBe(3);
+  });
+
+  it('remontar a tela no meio da distribuição retoma do ponto certo, sem repetir cartas', () => {
+    const tracker = createDealTracker();
+    const state = fresh();
+    const run = tracker.start(dealKey('m9', 1), state, 0)!;
+    const mid = landingMoments(run, state.dealerSeat, 2)[1];
+    // "Nova" montagem pede a mesma mão mais tarde: mesma execução, mesmo progresso.
+    const again = tracker.start(dealKey('m9', 1), state, mid);
+    expect(again).toBe(run);
+    expect(arrivedCards(again, state.dealerSeat, 2, mid)).toBe(2);
   });
 });

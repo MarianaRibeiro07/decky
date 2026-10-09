@@ -1,39 +1,28 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeOutUp, LayoutAnimationConfig, LinearTransition } from 'react-native-reanimated';
 import type { LegalActions } from '../../../supabase/functions/_shared/engine/game.ts';
 import type { Card, GameAction, PrivateHand, PublicGameState, Seat } from '../../contracts/types';
+import { useRerenderAt } from '../../lib/useRerenderAt';
 import { Button } from '../../ui/Button';
 import { Notice } from '../../ui/Notice';
 import { cardLabel, PlayingCard } from '../../ui/PlayingCard';
 import { colors, font, radius, space } from '../../ui/theme';
 import { trucoControls, type Control } from '../controls';
-import { dealBoundaries, landingTimes } from '../deal';
+import { arrivedCards, landingMoments } from '../deal';
 import type { DealAnimation } from '../useDealAnimation';
 
 const keyOf = (card: Card) => `${card.rank}_${card.suit}`;
+const NO_MOMENTS: number[] = [];
 
 /**
- * Quantas cartas da própria mão já "chegaram" na distribuição animada: cada uma entra na mão
- * quando a carta voadora correspondente pousa. Sem animação, todas (3).
+ * Quantas cartas da própria mão já "chegaram" na distribuição animada. Calculado no render
+ * (o primeiro quadro da mão nova já sai sem cartas) e redesenhado só quando uma carta pousa.
  */
 function useArrivedCards(deal: DealAnimation, dealing: boolean, dealerSeat: Seat, mySeat: Seat): number {
-  const [arrived, setArrived] = useState(3);
-  const run = deal.run;
-
-  useEffect(() => {
-    if (!run || !dealing) {
-      setArrived(3);
-      return;
-    }
-    const start = run.startedAt + dealBoundaries(run.intro).dealing;
-    const waits = landingTimes(dealerSeat, mySeat).map((t) => start + t - Date.now());
-    setArrived(waits.filter((w) => w <= 0).length);
-    const timers = waits.filter((w) => w > 0).map((w) => setTimeout(() => setArrived((n) => Math.min(3, n + 1)), w));
-    return () => timers.forEach(clearTimeout);
-  }, [run, dealing, dealerSeat, mySeat]);
-
-  return arrived;
+  const run = dealing ? deal.run : null;
+  useRerenderAt(run ? landingMoments(run, dealerSeat, mySeat) : NO_MOMENTS);
+  return arrivedCards(run, dealerSeat, mySeat, Date.now());
 }
 
 interface Props {
@@ -48,6 +37,8 @@ interface Props {
   onAct: (key: string, action: GameAction) => void;
   /** Área segura de baixo (barra de gestos), somada ao espaçamento do painel. */
   bottomInset: number;
+  /** 'large' quando a mão ocupa a tela (modo com mesa dedicada): cartas maiores. */
+  size?: 'normal' | 'large';
 }
 
 /**
@@ -55,7 +46,7 @@ interface Props {
  * Fluxo da carta: tocar seleciona (a carta sobe e ganha borda), confirmar envia ao servidor.
  * Tocar de novo na carta selecionada também confirma.
  */
-export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct, bottomInset }: Props) {
+export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct, bottomInset, size = 'normal' }: Props) {
   const { width, height } = useWindowDimensions();
   const [selected, setSelected] = useState<string | null>(null);
   const [confirmFold, setConfirmFold] = useState(false);
@@ -77,7 +68,8 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
     }
   }, [state.truco]);
 
-  const cardW = Math.min(112, (width - space.md * 2 - space.sm * 2) / 3, height * 0.13);
+  const large = size === 'large';
+  const cardW = Math.min(large ? 150 : 112, (width - space.md * 2 - space.sm * 2) / 3, height * (large ? 0.21 : 0.13));
 
   function tapCard(card: Card) {
     if (dealing || busy) return;
@@ -100,43 +92,49 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, onAct
     <View style={[styles.panel, { paddingBottom: space.sm + bottomInset }]}>
       <Notice kind="error" message={error} />
 
-      <View style={[styles.hand, { minHeight: cardW * 1.452 + 30 }]} accessibilityLabel="Suas cartas">
-        {cards.slice(0, arrived).map((card) => {
-          const key = keyOf(card);
-          const isSelected = key === selected;
-          const manilha = card.rank === state.manilhaRank;
-          return (
-            <Animated.View
-              key={`${state.handNumber}-${key}`}
-              entering={dealing ? FadeInDown.duration(260) : FadeIn.duration(200)}
-              exiting={FadeOutUp.duration(220)}
-              layout={LinearTransition.duration(200)}
-              style={[styles.slot, isSelected && styles.slotSelected]}
-            >
-              <PlayingCard
-                card={card}
-                width={cardW}
-                selected={isSelected}
-                highlighted={manilha && !isSelected}
-                dimmed={busy === `card-${key}`}
-                disabled={dealing || !!busy}
-                onPress={() => tapCard(card)}
-                hint={
-                  isSelected
-                    ? canPlay
-                      ? 'Selecionada. Toque de novo ou em Jogar para confirmar'
-                      : 'Selecionada. Espere a sua vez para jogar'
-                    : 'Toque para selecionar'
-                }
-              />
-              <Text style={[styles.cardTag, manilha && styles.cardTagManilha]}>{manilha ? '★ manilha' : ' '}</Text>
-            </Animated.View>
-          );
-        })}
-        {hand && cards.length === 0 && state.status === 'playing' ? (
-          <Text style={styles.empty}>Sem cartas nesta mão. Aguarde a próxima.</Text>
-        ) : null}
-      </View>
+      {/* Abrir a tela ou reconectar não refaz a entrada das cartas que já estavam na mão. */}
+      <LayoutAnimationConfig skipEntering>
+        <View style={[styles.hand, { minHeight: cardW * 1.452 + 30 }]} accessibilityLabel="Suas cartas">
+          {cards.slice(0, arrived).map((card) => {
+            const key = keyOf(card);
+            const isSelected = key === selected;
+            const manilha = card.rank === state.manilhaRank;
+            return (
+              // A animação de layout fica no invólucro; o deslocamento da seleção vai na view de dentro,
+              // para o Reanimated não sobrescrever o `transform` (aviso "may be overwritten by a layout animation").
+              <Animated.View
+                key={`${state.handNumber}-${key}`}
+                entering={dealing ? FadeInDown.duration(260) : FadeIn.duration(200)}
+                exiting={FadeOutUp.duration(220)}
+                layout={LinearTransition.duration(200)}
+              >
+                <View style={[styles.slot, isSelected && styles.slotSelected]}>
+                  <PlayingCard
+                    card={card}
+                    width={cardW}
+                    selected={isSelected}
+                    highlighted={manilha && !isSelected}
+                    dimmed={busy === `card-${key}`}
+                    disabled={dealing || !!busy}
+                    onPress={() => tapCard(card)}
+                    hint={
+                      isSelected
+                        ? canPlay
+                          ? 'Selecionada. Toque de novo ou em Jogar para confirmar'
+                          : 'Selecionada. Espere a sua vez para jogar'
+                        : 'Toque para selecionar'
+                    }
+                  />
+                  <Text style={[styles.cardTag, manilha && styles.cardTagManilha]}>{manilha ? '★ manilha' : ' '}</Text>
+                </View>
+              </Animated.View>
+            );
+          })}
+          {hand && cards.length === 0 && state.status === 'playing' ? (
+            <Text style={styles.empty}>Sem cartas nesta mão. Aguarde a próxima.</Text>
+          ) : null}
+        </View>
+      </LayoutAnimationConfig>
 
       {confirmFold ? (
         <Animated.View entering={FadeIn.duration(150)} style={styles.confirm}>

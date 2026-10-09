@@ -40,14 +40,16 @@ Princípios:
 | `src/contracts/types.ts` | Contratos (T-00). Tipos do jogo reexportados do motor |
 | `src/rooms/` | API de salas e `useRoom` (lobby em tempo real) |
 | `src/game/` | API da partida, `useMatch` (estado público, mão e papel do aparelho), textos da mesa |
-| `src/game/PlayerGame.tsx`, `src/game/TableGame.tsx` | As duas telas de partida: jogador (mesa em cima, mão embaixo) e mesa central (só público) |
-| `src/game/components/` | `TableBoard` (mesa compartilhada pelos dois modos), `DealLayer` (distribuição animada), `ViraCard`, `SeatChip`, `ScoreBar`, `StatusBanner`, `HandPanel` (mão e controles), `FinishedOverlay` |
-| `src/game/deal.ts`, `useDealAnimation.ts` | Ordem e cronograma da distribuição e a regra "anima uma vez por mão" |
+| `src/game/PlayerGame.tsx`, `src/game/TableGame.tsx` | As duas telas de partida: jogador (sem mesa dedicada: mesa em cima e mão embaixo; com mesa dedicada: só mão e essencial público) e mesa central (só público) |
+| `src/game/components/` | `TableBoard` (mesa completa), `PlayerHud` (essencial público do jogador quando há mesa dedicada), `DealLayer` (distribuição animada), `ViraCard`, `SeatChip`, `ScoreBar`, `StatusBanner`, `HandPanel` (mão e controles), `FinishedOverlay` |
+| `src/game/deal.ts`, `useDealAnimation.ts` | Ordem e cronograma da distribuição, a regra "anima uma vez por mão" e a fase calculada no render |
+| `src/game/matchData.ts` | Junta cada leitura ao estado atual sem recriar o que não mudou (polling não redesenha) e descarta mão em aparelho que não é jogador |
 | `src/game/geometry.ts` | Posições da mesa (puro, testado: nada se sobrepõe) |
 | `src/game/controls.ts`, `status.ts` | Botões de truco legais e a linha de status (puros, testados) |
 | `app/room/create.tsx` | Criar sala escolhendo o modo (dono joga ou é a mesa) |
 | `app/dev/preview.tsx` | **Fixture local, só em desenvolvimento**: simula o servidor com o motor para ver a mesa sem Supabase |
-| `src/lib/useLiveRefresh.ts` | Realtime + polling de segurança + recarga ao voltar do segundo plano |
+| `src/lib/useLiveRefresh.ts`, `channelTopic.ts` | Realtime (um canal novo por montagem) + polling de segurança + recarga ao voltar do segundo plano |
+| `src/lib/useRerenderAt.ts` | Redesenha nos instantes em que uma fase de animação muda (timers limpos ao desmontar) |
 | `src/history/` | Histórico e CRUD de notas |
 | `src/auth/` | Sessão, cadastro, login e validação por REGEX |
 | `src/ui/` | Tema, botão, campo, aviso, carta |
@@ -117,6 +119,8 @@ O cliente não tem `INSERT/UPDATE/DELETE` em nenhuma tabela, exceto `match_notes
 - Polling de segurança (3 a 4 s) e releitura ao voltar do segundo plano cobrem eventos perdidos. Reconectar só lê; ações não são reenviadas.
 - Falha de rede ao enviar uma jogada: o app reenvia com o **mesmo** `clientActionId`, e o servidor não duplica.
 - Uma leitura por vez; um pedido de leitura durante outra agenda mais uma ao final, para não perder a mudança logo depois de uma jogada. Leitura bem-sucedida tira o aviso "Sem conexão", mesmo com o Realtime caído (o polling cobre).
+- Leitura igual à anterior (mesma revisão) devolve o mesmo objeto de estado (`mergeMatchData`), então polling e avisos repetidos do Realtime não redesenham a partida. Leitura atrasada nunca volta para uma revisão mais antiga.
+- Cada montagem da tela assina um canal com nome único (`channelTopic`). O `supabase.channel(nome)` devolve o canal existente com o mesmo nome e `removeChannel` é assíncrono; com nome fixo, sair e voltar rápido para a partida lançava `cannot add postgres_changes callbacks after subscribe()`.
 - A tela da partida fica acesa (`useScreenAwake`), importante para a mesa central.
 
 ## Deploy
@@ -140,21 +144,23 @@ O dono escolhe ao criar a sala (`app/room/create.tsx`) e pode trocar no lobby, a
 |---|---|---|
 | Dono | Ocupa um dos 4 lugares e joga | Não ocupa lugar, não tem mão, não joga |
 | Tela do dono | Mesa em cima, mão embaixo (`PlayerGame`) | Mesa central em tela cheia (`TableGame`) |
-| Tela dos jogadores | `PlayerGame` | `PlayerGame` |
+| Tela dos jogadores | `PlayerGame`: mesa completa em cima, mão embaixo | `PlayerGame` com `PlayerHud`: mão maior, controles e só o essencial público (placar, valor, vez, vira e manilha, truco, quem já jogou). **Sem** a mesa completa: as cartas jogadas aparecem só na mesa central |
 | `matches.table_user_id` | null | id do dono |
 
 Segurança do modo mesa, garantida no banco (testada em `tests/sql/table-mode.test.ts` e `tests/sql/flow.test.ts`):
 
 - A mesa lê `matches`, `match_players` e `match_events` por `is_match_viewer` (jogador **ou** `table_user_id`). Nada além do estado público.
-- `get_my_hand` devolve `null` para a mesa: ela não está em `private.private_hands`.
+- `get_my_hand` devolve `null` para a mesa: ela não está em `private.private_hands`. O app nem pede: só chama `get_my_hand` se o usuário está em `match_players`, e `mergeMatchData` descarta qualquer mão num aparelho que não é jogador.
+- O papel do aparelho vem só de `match_players` e de `table_user_id` (`resolveRole`); receber uma mão não transforma ninguém em jogador.
+- O Realtime publica só `rooms`, `room_players` e `matches`; nem `private.private_hands` nem `match_events` (teste em `tests/sql/table-mode.test.ts`). Nem a `service_role` lê o schema `private` direto: só as funções `security definer`.
 - `internal_get_match` exige estar em `match_players`, então `submit-action` responde `not_member` a qualquer ação da mesa.
 - O dono administra a sala (iniciar, trocar o modo), mas o servidor não depende do aparelho dele: se a mesa fechar o app, a partida segue nos 4 celulares.
 
-O app decide qual tela mostrar pelo que o servidor entregou (`resolveRole` em `src/game/role.ts`), nunca por parâmetro de rota.
+O app decide qual tela mostrar pelo que o servidor entregou (`resolveRole` e `playerLayout` em `src/game/role.ts`), nunca por parâmetro de rota.
 
 ## Mesa e distribuição animada
 
-`TableBoard` desenha a mesma mesa nos dois modos; muda só a escala (`compact` na metade de cima do jogador, `large` na mesa central). As posições vêm de `tableGeometry`, que garante que lugares, cartas jogadas, baralho, vira e selo da manilha não se sobrepõem (teste em `tests/app/table.test.ts`). Quem olha fica sempre embaixo; a mesa central põe o lugar 1 embaixo.
+`TableBoard` desenha a mesa completa: na mesa central (`large`) e, quando não há mesa dedicada, na metade de cima do jogador (`compact`). As posições vêm de `tableGeometry`, que garante que lugares, cartas jogadas, baralho, vira e selo da manilha não se sobrepõem (teste em `tests/app/table.test.ts`). Quem olha fica sempre embaixo; a mesa central põe o lugar 1 embaixo.
 
 Distribuição (`src/game/deal.ts`, animada com React Native Reanimated):
 
@@ -170,6 +176,10 @@ Regras da animação:
 - **Entrar no meio da mão não anima** (já há carta jogada): a tela mostra o estado direto.
 - Nenhuma regra depende do fim da animação. Durante ela o app só segura os toques do próprio jogador (cerca de 1,5 s); o servidor já aceita jogadas.
 - Respeita "reduzir movimento" do aparelho (padrão do Reanimated): as cartas não voam, mas a mão e a vira aparecem normalmente.
+- **A fase é calculada no render** a partir do relógio (`dealPhaseNow`, `arrivedCards`); `useRerenderAt` só agenda o redesenho nas trocas de fase. Antes a fase vinha de um `useEffect`, e o primeiro quadro de cada mão nova saía com a mão e a vira abertas antes de a animação começar.
+- A vira só gira durante a etapa `reveal` (componente montado só nela, começando do verso); fora dela é uma carta estática.
+- Cartas na mesa têm chave pela própria carta (`playedCardKey`): quando a vaza fecha, as três primeiras esmaecem no lugar e só a quarta entra voando. Ao abrir a tela ou reconectar, `LayoutAnimationConfig skipEntering` mostra o que já estava na mesa e na mão sem refazer as entradas.
+- Na mão, a animação de layout fica num invólucro e o deslocamento da carta selecionada numa view interna (o Reanimated avisava que o `transform` seria sobrescrito).
 
 ## Jogada e controles
 
@@ -178,6 +188,19 @@ Regras da animação:
 - Os botões de truco vêm de `trucoControls`, espelho de `getLegalActions`: pedir (TRUCO, SEIS, NOVE ou DOZE, conforme o valor) e, para a dupla que responde, Aceitar, Correr e Pedir o próximo valor. A dupla que pediu vê "Aguardando a outra dupla responder". Correr sem pedido pendente pede confirmação.
 - A carta jogada entra na mesa vindo do lado de quem jogou; a vencedora da vaza é destacada quando a mesa limpa.
 - Quem pediu, aceitou ou correu ganha uma fala curta ao lado do nome ("TRUCO!", "Aceito!", "Corro!") em todos os aparelhos, a partir de `lastEvent`.
+
+## Desempenho
+
+Gargalos encontrados e corrigidos (outubro/2026):
+
+| Gargalo | Correção |
+|---|---|
+| Polling de 4 s e Realtime recriavam o estado e redesenhavam a partida inteira a cada leitura, mesmo sem mudança | `mergeMatchData` reaproveita objetos; leitura igual não gera render |
+| Selecionar carta, enviar jogada ou mostrar erro redesenhava a mesa e o placar | `TableBoard`, `ScoreBar` e `PlayerHud` com `memo`; `leaveTable` estável |
+| Verso da carta de 1024 x 1536 (2,2 MB) decodificado em até ~25 imagens durante a distribuição | `assets/cards/back.png`, 400 x 600 (0,35 MB) |
+| Canal Realtime reaproveitado ao remontar a tela (erro e assinatura perdida) | Nome de canal único por montagem |
+
+A versão das bibliotecas de animação é a que o Expo 57 espera (`react-native-reanimated` 4.5.1, `react-native-worklets` 0.10.1; `npx expo install --check` sem pendências), e o `babel-preset-expo` já inclui o plugin de worklets: não há `babel.config.js` a configurar.
 
 ## O que não fazer
 

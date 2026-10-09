@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { useCallback } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MatchPlayer, MatchView, Seat } from '../contracts/types';
@@ -31,12 +32,12 @@ export function TableGame({ match, players, connection }: Props) {
   const bubble = useEventBubble(match);
   const nameOf = (seat: Seat) => players.find((p) => p.seat === seat)?.displayName ?? `Lugar ${seat}`;
 
-  function leaveTable() {
+  const leaveTable = useCallback(() => {
     Alert.alert('Sair da mesa?', 'A partida continua nos celulares dos jogadores. Você pode abrir a mesa de novo pela sala.', [
       { text: 'Ficar', style: 'cancel' },
       { text: 'Sair', onPress: () => router.replace('/') },
     ]);
-  }
+  }, []);
 
   return (
     <View

@@ -165,6 +165,39 @@ describe('partida com mesa dedicada', () => {
     expect(loaded.r).toEqual({ ok: false, error: 'not_member' });
   });
 
+  it('Realtime publica só tabelas públicas: mãos e eventos nunca vão pelo canal', async () => {
+    const rows = await t.db
+      .query<{ schemaname: string; tablename: string }>(
+        `select schemaname, tablename from pg_publication_tables where pubname = 'supabase_realtime' order by tablename`,
+      )
+      .then((r) => r.rows);
+    expect(rows).toEqual([
+      { schemaname: 'public', tablename: 'matches' },
+      { schemaname: 'public', tablename: 'room_players' },
+      { schemaname: 'public', tablename: 'rooms' },
+    ]);
+  });
+
+  it('a linha de matches (o que o Realtime entrega à mesa) não tem coluna nem campo de mão', async () => {
+    await readyAll();
+    const { matchId } = await startAsService(room.id, mesa);
+    const [row] = await t.asUser<Record<string, unknown>>(mesa, 'select * from public.matches where id = $1', [matchId]);
+    expect(Object.keys(row)).not.toContain('hands');
+    const state = row.public_state as Record<string, unknown>;
+    expect(Object.keys(state)).not.toContain('hands');
+    // As 12 cartas distribuídas não aparecem em lugar nenhum do que a mesa lê.
+    // Leitura de administrador (nem service_role lê o schema private direto).
+    const [all] = await t.db
+      .query<{ hands: { rank: string; suit: string }[][] }>(
+        'select jsonb_agg(cards order by seat) as hands from private.private_hands where match_id = $1',
+        [matchId],
+      )
+      .then((r) => r.rows);
+    expect(all.hands.flat()).toHaveLength(12);
+    const text = JSON.stringify(row);
+    for (const card of all.hands.flat()) expect(text).not.toContain(JSON.stringify(card));
+  });
+
   it('com o dono jogador não há mesa registrada', async () => {
     const other = await createRoom(eva);
     const players = await Promise.all(['P2', 'P3', 'P4'].map((n) => t.createUser(n)));

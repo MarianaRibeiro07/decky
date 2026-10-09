@@ -1,34 +1,18 @@
 import { useCallback, useRef, useState } from 'react';
-import type { MatchPlayer, MatchRole, MatchView, PrivateHand } from '../contracts/types';
+import type { MatchPlayer, PrivateHand } from '../contracts/types';
 import { useLiveRefresh } from '../lib/useLiveRefresh';
 import { fetchMatch, fetchMatchPlayers, fetchMyHand } from './api';
-import { resolveRole } from './role';
+import { EMPTY_MATCH_DATA, mergeMatchData, type MatchData } from './matchData';
 
-export interface MatchData {
-  match: MatchView | null;
-  hand: PrivateHand | null;
-  players: MatchPlayer[];
-  /** Jogador (tem mão) ou mesa central (só estado público). null antes de carregar. */
-  role: MatchRole | null;
-  loaded: boolean;
-  /** true quando a partida não existe ou o usuário não pode vê-la. */
-  notFound: boolean;
-}
+export type { MatchData };
 
 /**
  * Estado público da partida (Realtime em `matches`) e, para jogadores, a própria mão (get_my_hand).
  * A mão nunca chega por Realtime: é buscada sempre que a revisão muda. A mesa central nunca recebe mão;
- * o servidor devolve null para quem não é jogador.
+ * o servidor devolve null para quem não é jogador, e este hook nem chega a pedir.
  */
 export function useMatch(matchId: string | undefined, userId: string | null) {
-  const [data, setData] = useState<MatchData>({
-    match: null,
-    hand: null,
-    players: [],
-    role: null,
-    loaded: false,
-    notFound: false,
-  });
+  const [data, setData] = useState<MatchData>(EMPTY_MATCH_DATA);
   const handRevision = useRef<number | null>(null);
   const playersCache = useRef<MatchPlayer[] | null>(null);
 
@@ -36,7 +20,7 @@ export function useMatch(matchId: string | undefined, userId: string | null) {
     if (!matchId) return;
     const match = await fetchMatch(matchId);
     if (!match) {
-      setData((d) => ({ ...d, loaded: true, notFound: true }));
+      setData((d) => (d.loaded && d.notFound ? d : { ...d, loaded: true, notFound: true }));
       return;
     }
 
@@ -50,19 +34,8 @@ export function useMatch(matchId: string | undefined, userId: string | null) {
       handRevision.current = hand?.revision ?? null;
     }
 
-    setData((d) => {
-      const nextHand = hand === undefined ? d.hand : hand;
-      const role = resolveRole(userId, match, players, nextHand);
-      return {
-        // Leituras podem chegar fora de ordem: nunca volta para uma revisão mais antiga.
-        match: d.match && d.match.revision > match.revision ? d.match : match,
-        hand: nextHand,
-        players,
-        role,
-        loaded: true,
-        notFound: role === null,
-      };
-    });
+    // Leitura igual à anterior (polling, Realtime repetido) não redesenha a partida.
+    setData((d) => mergeMatchData(d, { match, players, hand }, userId));
   }, [matchId, userId]);
 
   const { status, refreshNow } = useLiveRefresh(
