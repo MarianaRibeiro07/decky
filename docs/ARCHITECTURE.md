@@ -238,7 +238,19 @@ Garantias (testadas em `tests/engine/game.test.ts` e, pelo servidor e banco, em 
 - Reconectar só lê: o pedido continua no estado público e ninguém confirma por reconectar.
 - O valor da mão só muda depois da confirmação: a tela nunca mostra o aumento como aceito antes.
 
-Sem expiração por tempo: um pedido sem resposta fica parado até o parceiro responder ou quem pediu desistir (o mesmo que acontece com um truco sem resposta). Expirar exigiria relógio no servidor e uma ação para limpar o pedido.
+O pedido corre dentro do prazo da decisão de baixo (20 s, ver "Carta escondida, jogada automática e prazo"): se o prazo vence com o pedido aberto, ele termina como `expired` e a regra do timeout é aplicada.
+
+## Carta escondida, jogada automática e prazo
+
+Regras D-20 a D-28 em [RULES.md](RULES.md); desenho em `docs/superpowers/specs/2026-10-09-encoberta-auto-timer-design.md`.
+
+**Carta escondida.** `play_card { hidden: true }`. A carta sai da mão e vai para `private.private_hands.covered`; na mesa pública entra só `{ seat, card: null, hidden: true }`, e o evento sai sem `card`. Quando a vaza fecha, o motor junta as cartas reais, resolve a vaza e grava `lastTrick` com `hidden: true` nas que estavam viradas. A mesa central nunca recebe a carta; o dono a vê pelo `covered` de `get_my_hand` (face esmaecida com o selo do olho riscado). No app, a chave da carta escondida é `hidden-<lugar>-<vaza>` (`playedCardKey`), então o mesmo componente vira a carta (`HiddenPlayed`, `rotateY` simulado por `scaleX`, 420 ms) em vez de remontar. Montada já revelada (reconexão), aparece aberta, sem girar.
+
+**Jogada automática.** A marcação fica em `private.private_hands.auto_card` e é gravada por `set_my_auto_card` (RPC para `authenticated`): confere carta na própria mão e que não é a própria vez com jogada livre, trava a partida, **não muda a revisão** nem gera evento. Depois de toda ação aceita, `runAutoPlays` joga em cadeia as cartas marcadas de quem recebe a vez (pela mesma `executeRule` da jogada manual; até 4). `lastEvent` continua sendo a ação pedida (os avisos da mesa não mudam); `match_events` recebe a ação e as jogadas automáticas (`auto: true`), com o `clientActionId` só na primeira. Se a marcação muda entre a leitura e o commit, `internal_commit_action` devolve `auto_changed` (confere `auto_card` contra o que o motor leu, dentro do `FOR UPDATE`) e o serviço refaz a ação, até 2 vezes, sem erro para o usuário. No app: arrastar a carta para cima (`PanResponder`, limite de 60% da altura da carta, mínimo 56 pt; só captura movimento vertical, o toque continua selecionando); contorno azul-aço e selo de relâmpago no canto superior esquerdo; tocar no selo ou arrastar de novo cancela.
+
+**Prazo.** `public_state.deadline = { kind, seat, team, startsAt, at }`, em epoch ms do Postgres (`deadlineFor` em `engine/turns.ts`). Um relógio só: `internal_get_match` devolve `now` do banco ao motor, e `server_now()` serve ao app. Quando o prazo vence, os jogadores pedem `expire { at }` (`useDeadlineExpiry`: um timer por prazo; o lugar 1 tenta 300 ms depois do fim e os outros a cada 700 ms; `clientActionId = expire-<at>-<lugar>`). O servidor confere `at` e o relógio dele e aplica D-26 ou D-27; os outros pedidos recebem `conflict` ou `too_early` e o app só relê. A mesa central não pede (`not_member`). `useServerClock` acerta a diferença de relógio ao montar, ao voltar do segundo plano e pelo `serverNow` das respostas. `DeadlineBar` é o único componente que redesenha com o tempo (uma vez por segundo, `useRerenderAt`); a barra desce com um único `withTiming` na thread de UI e ignora "reduzir movimento", porque é informação. Ela fica numa faixa fixa acima da fileira de ações (sua vez e resposta ao truco) e como filete na base da etiqueta de quem decide na mesa.
+
+**Deploy:** exige a migration `20261009120000_hidden_auto_timer.sql` **e** republicar `start-match` e `submit-action` juntas: a assinatura de `internal_commit_action` mudou, e a antiga foi removida.
 
 ## Avisos de truco
 

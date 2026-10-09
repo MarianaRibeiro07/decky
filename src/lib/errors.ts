@@ -23,6 +23,7 @@ const MESSAGES: Record<string, string> = {
   invalid_card: 'Esta carta não está na sua mão.',
   illegal_action: 'Esta jogada não é permitida agora.',
   match_over: 'A partida já terminou.',
+  too_early: 'Ainda há tempo para esta jogada.',
   conflict: 'A mesa mudou. Atualizamos para você, tente de novo.',
   not_member: 'Só os 4 jogadores podem jogar. A mesa apenas mostra a partida.',
   match_not_found: 'Partida não encontrada.',

@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
-import type { Team } from '../../contracts/types';
+import type { ActionDeadline, Team } from '../../contracts/types';
+import { DeadlineBar } from './DeadlineBar';
 import { colors, font, radius, shadow } from '../../ui/theme';
 import type { ChipLayout, Rect } from '../geometry';
 import { HandPips, PlayerAvatar, TeamTag, TurnTag } from './PlayerIdentity';
@@ -17,6 +18,8 @@ interface Props {
   /** Cartas ainda na mão do lugar; null para não mostrar (a própria mão já aparece embaixo). */
   cardsLeft: number | null;
   large: boolean;
+  /** Prazo da decisão deste lugar: filete que desce na base da etiqueta. */
+  timer?: { deadline: ActionDeadline; offset: number } | null;
 }
 
 /**
@@ -28,7 +31,7 @@ interface Props {
  * vez quando a vez chega e fica parado (sem pulsar), para não cansar a leitura nem gastar bateria.
  * Fica sempre dentro do retângulo recebido: a geometria já garante que ele está dentro do feltro.
  */
-export function SeatChip({ rect, layout, name, initials, teamText, team, isTurn, cardsLeft, large }: Props) {
+export function SeatChip({ rect, layout, name, initials, teamText, team, isTurn, cardsLeft, large, timer }: Props) {
   const column = layout === 'column';
   const avatar = column ? (large ? 30 : 22) : Math.round(rect.h - (large ? 16 : 12));
   // Na lateral da mesa dedicada, "DUPLA B" e as cartas não cabem lado a lado: uma linha para cada.
@@ -68,6 +71,12 @@ export function SeatChip({ rect, layout, name, initials, teamText, team, isTurn,
             {showPips ? <HandPips left={cardsLeft!} large={large && !column} /> : null}
           </View>
         </View>
+        {/* Dentro da etiqueta, na base: não cobre nome, avatar nem carta jogada. */}
+        {timer ? (
+          <View pointerEvents="none" style={styles.timer}>
+            <DeadlineBar deadline={timer.deadline} offset={timer.offset} variant="thin" />
+          </View>
+        ) : null}
       </View>
       {/* Brilho da vez: entra uma vez e fica parado; some quando a vez passa. */}
       {isTurn ? (
@@ -106,6 +115,7 @@ const styles = StyleSheet.create({
   meta: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%' },
   metaColumn: { justifyContent: 'center', gap: 4 },
   metaStacked: { flexDirection: 'column', gap: 3 },
+  timer: { position: 'absolute', left: 5, right: 5, bottom: 2 },
   glow: {
     ...StyleSheet.absoluteFill,
     borderRadius: radius.sm + 2,

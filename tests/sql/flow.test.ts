@@ -22,9 +22,13 @@ const ARGS: Record<string, string[]> = {
     'p_expected_revision',
     'p_state',
     'p_hands',
-    'p_event',
+    'p_covered',
+    'p_auto_cards',
+    'p_auto_used',
+    'p_events',
     'p_client_action_id',
   ],
+  server_now: [],
 };
 
 /** O que a Edge Function faz com a chave de serviço. */
@@ -35,7 +39,7 @@ const rpc: Rpc = async (fn, params) => {
   return row.r;
 };
 
-type Hand = { revision: number; seat: Seat; cards: Card[] } | null;
+type Hand = { revision: number; seat: Seat; cards: Card[]; covered: Card | null; autoCard: Card | null } | null;
 type MatchRow = { revision: number; public_state: PublicGameState; status: string };
 
 const myHand = async (user: string, matchId: string): Promise<Hand> =>
@@ -419,4 +423,169 @@ describe('host mesa: 5 aparelhos', () => {
     const [room] = await t.asUser<{ status: string }>(mesa, 'select status from public.rooms where id = $1', [roomId]);
     expect(room.status).toBe('lobby');
   }, 120_000);
+});
+
+describe('carta escondida, jogada automática e prazo (pelo servidor e banco)', () => {
+  let matchId: string;
+  const players = () => [ana, bia, caio, duda];
+
+  beforeEach(async () => {
+    const host = await setupRoom('table');
+    const { body } = await startMatchService(rpc, host, { roomId }, rng);
+    matchId = body.matchId as string;
+  });
+
+  /** Quem tem a vez joga a primeira carta da mão. */
+  async function playTurn(hidden = false) {
+    const s = (await readMatch(mesa, matchId)).public_state;
+    const player = players()[s.currentTurnSeat - 1];
+    const card = (await myHand(player, matchId))!.cards[0];
+    const action: GameAction = hidden ? { type: 'play_card', card, hidden: true } : { type: 'play_card', card };
+    expect(await submit(player, matchId, action)).toMatchObject({ ok: true });
+    return { seat: s.currentTurnSeat, player, card };
+  }
+
+  /** Simula o relógio: põe o prazo em aberto no passado (direto no banco) e devolve o novo `at`. */
+  async function forceDeadlinePast(): Promise<number> {
+    const result = await t.db.query<{ at: number }>(
+      `update public.matches
+       set public_state = jsonb_set(
+         jsonb_set(public_state, '{deadline,at}', to_jsonb(public.server_now() - 1000)),
+         '{deadline,startsAt}', to_jsonb(public.server_now() - 21000))
+       where id = $1
+       returning (public_state -> 'deadline' ->> 'at')::float8 as at`,
+      [matchId],
+    );
+    return result.rows[0].at;
+  }
+
+  const setAuto = async (user: string, card: Card | null) =>
+    (await t.asUser<{ r: any }>(user, 'select public.set_my_auto_card($1, $2) as r', [matchId, card]))[0].r;
+
+  it('a partida nova já tem prazo de jogada, no relógio do banco', async () => {
+    const s = (await readMatch(mesa, matchId)).public_state;
+    const [{ now }] = await t.asUser<{ now: number }>(ana, 'select public.server_now() as now');
+    expect(s.deadline).toMatchObject({ kind: 'play', seat: s.currentTurnSeat });
+    expect(Math.abs(s.deadline!.startsAt - now)).toBeLessThan(10_000);
+  });
+
+  it('a carta escondida não sai em matches, match_events nem para a mesa; só o dono a vê', async () => {
+    for (let i = 0; i < 4; i++) await playTurn();
+    const { seat, player, card } = await playTurn(true);
+
+    for (const viewer of [mesa, ...players()]) {
+      const view = await readMatch(viewer, matchId);
+      expect(view.public_state.tableCards).toEqual([{ seat, card: null, hidden: true }]);
+      expect(JSON.stringify(view.public_state)).not.toContain(JSON.stringify(card));
+    }
+    const events = await t.asUser(mesa, 'select payload_public from public.match_events where match_id = $1', [matchId]);
+    expect(JSON.stringify(events)).not.toContain(JSON.stringify(card));
+    expect((await myHand(player, matchId))!.covered).toEqual(card);
+    const other = players().find((p) => p !== player)!;
+    expect((await myHand(other, matchId))!.covered).toBeNull();
+    expect(await myHand(mesa, matchId)).toBeNull();
+  });
+
+  it('na 1ª vaza a escondida é recusada pelo servidor', async () => {
+    const s = (await readMatch(mesa, matchId)).public_state;
+    const player = players()[s.currentTurnSeat - 1];
+    const card = (await myHand(player, matchId))!.cards[0];
+    expect(await submit(player, matchId, { type: 'play_card', card, hidden: true })).toEqual({
+      ok: false,
+      error: 'illegal_action',
+    });
+  });
+
+  it('set_my_auto_card: só carta da própria mão, fora da própria vez; não muda a revisão', async () => {
+    const s = (await readMatch(mesa, matchId)).public_state;
+    const turnPlayer = players()[s.currentTurnSeat - 1];
+    const nextSeatNumber = ((s.currentTurnSeat % 4) + 1) as Seat;
+    const nextPlayer = players()[nextSeatNumber - 1];
+    const nextCard = (await myHand(nextPlayer, matchId))!.cards[1];
+
+    expect(await setAuto(turnPlayer, (await myHand(turnPlayer, matchId))!.cards[0])).toEqual({
+      ok: false,
+      error: 'illegal_action',
+    });
+    expect(await setAuto(turnPlayer, nextCard)).toEqual({ ok: false, error: 'invalid_card' });
+    expect(await setAuto(mesa, nextCard)).toEqual({ ok: false, error: 'not_member' });
+
+    expect(await setAuto(nextPlayer, nextCard)).toEqual({ ok: true, autoCard: nextCard });
+    expect((await readMatch(mesa, matchId)).revision).toBe(0);
+    expect((await myHand(nextPlayer, matchId))!.autoCard).toEqual(nextCard);
+    expect(JSON.stringify((await readMatch(mesa, matchId)).public_state)).not.toContain(JSON.stringify(nextCard));
+
+    // Quem tem a vez joga: a carta marcada do próximo cai sozinha, aberta, e a marcação some.
+    await playTurn();
+    const after = await readMatch(mesa, matchId);
+    expect(after.revision).toBe(1);
+    expect(after.public_state.tableCards[1]).toEqual({ seat: nextSeatNumber, card: nextCard });
+    expect((await myHand(nextPlayer, matchId))!.autoCard).toBeNull();
+    const events = await t.asUser<{ client_action_id: string | null; payload_public: any }>(
+      mesa,
+      'select client_action_id, payload_public from public.match_events where match_id = $1 and revision = 1 order by id',
+      [matchId],
+    );
+    expect(events).toHaveLength(2);
+    expect(events[1].payload_public).toMatchObject({ auto: true, card: nextCard });
+    expect(events[1].client_action_id).toBeNull();
+  });
+
+  it('marcação que muda no meio do commit: o serviço refaz com a marcação nova', async () => {
+    const s = (await readMatch(mesa, matchId)).public_state;
+    const turnPlayer = players()[s.currentTurnSeat - 1];
+    const nextPlayer = players()[s.currentTurnSeat % 4];
+    const card = (await myHand(turnPlayer, matchId))!.cards[0];
+    const nextCard = (await myHand(nextPlayer, matchId))!.cards[0];
+
+    // A marcação chega entre a leitura e o commit do serviço.
+    let injected = false;
+    const racingRpc: Rpc = async (fn, params) => {
+      if (fn === 'internal_commit_action' && !injected) {
+        injected = true;
+        await setAuto(nextPlayer, nextCard);
+      }
+      return rpc(fn, params);
+    };
+    const { body } = await submitActionService(
+      racingRpc,
+      turnPlayer,
+      { matchId, action: { type: 'play_card', card }, expectedRevision: 0, clientActionId: 'corrida-1' },
+      rng,
+    );
+    expect(body).toMatchObject({ ok: true, newRevision: 1 });
+    expect((await readMatch(mesa, matchId)).public_state.tableCards).toHaveLength(2);
+    expect((await myHand(nextPlayer, matchId))!.autoCard).toBeNull();
+  });
+
+  it('expirar: só depois do prazo, uma vez só, e a mesa não pode', async () => {
+    const before = (await readMatch(mesa, matchId)).public_state;
+    expect(await submit(ana, matchId, { type: 'expire', at: before.deadline!.at })).toEqual({ ok: false, error: 'too_early' });
+
+    const at = await forceDeadlinePast();
+    expect(await submit(mesa, matchId, { type: 'expire', at })).toEqual({ ok: false, error: 'not_member' });
+
+    // Dois aparelhos ao mesmo tempo, com a mesma revisão: um vence, o outro recebe conflito.
+    const first = await submit(bia, matchId, { type: 'expire', at }, { expectedRevision: 0 });
+    const second = await submit(caio, matchId, { type: 'expire', at }, { expectedRevision: 0 });
+    expect(first).toMatchObject({ ok: true, newRevision: 1 });
+    expect(second).toEqual({ ok: false, error: 'conflict' });
+
+    const after = await readMatch(mesa, matchId);
+    expect(after.public_state.tableCards).toHaveLength(1);
+    expect(after.public_state.lastEvent).toMatchObject({ seat: before.currentTurnSeat, action: 'play_card', timeout: true });
+    // Atrasado, já com a revisão nova: o prazo em aberto é outro.
+    expect(await submit(duda, matchId, { type: 'expire', at })).toEqual({ ok: false, error: 'too_early' });
+  });
+
+  it('truco sem resposta no prazo conta como recusa', async () => {
+    const s = (await readMatch(mesa, matchId)).public_state;
+    const asker = players()[s.currentTurnSeat - 1];
+    expect(await submit(asker, matchId, { type: 'request_truco' })).toMatchObject({ ok: true });
+    const at = await forceDeadlinePast();
+    expect(await submit(asker, matchId, { type: 'expire', at })).toMatchObject({ ok: true });
+    const after = (await readMatch(mesa, matchId)).public_state;
+    expect(after.lastHand).toEqual({ winner: teamOf(s.currentTurnSeat), points: 1, reason: 'refused' });
+    expect(after.lastEvent).toMatchObject({ action: 'respond_truco', response: 'refuse', timeout: true });
+  });
 });

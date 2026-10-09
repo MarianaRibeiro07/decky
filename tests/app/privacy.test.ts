@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyAction, getLegalActions, newMatch, seededRng } from '../../supabase/functions/_shared/engine/index.ts';
 import type { MatchState } from '../../supabase/functions/_shared/engine/index.ts';
-import type { Seat, TableCard } from '../../src/contracts/types';
+import type { PublicTableCard, Seat } from '../../src/contracts/types';
 import { playedCardKey, seatSummaries } from '../../src/game/describe';
 import { playerLayout } from '../../src/game/role';
 
@@ -41,7 +41,8 @@ describe('resumo público dos lugares (tela do jogador com mesa dedicada)', () =
     const seats = seatSummaries(game.public, 1, nameOf, false);
 
     const text = JSON.stringify(seats);
-    for (const card of [...game.hands.flat(), ...game.public.tableCards.map((c) => c.card)]) {
+    const onTable = game.public.tableCards.flatMap((c) => (c.card ? [c.card] : []));
+    for (const card of [...game.hands.flat(), ...onTable]) {
       expect(text).not.toContain(`"rank":"${card.rank}","suit":"${card.suit}"`);
     }
     expect(Object.keys(seats[0]).sort()).toEqual(['cardsLeft', 'isTurn', 'name', 'played', 'seat', 'team']);
@@ -58,7 +59,7 @@ describe('cartas na mesa sem piscar quando a vaza fecha', () => {
   it('a mesma carta tem a mesma identidade na mesa e na última vaza', () => {
     const rng = seededRng(11);
     let game = newMatch(rng);
-    const onTable: TableCard[] = [];
+    const onTable: PublicTableCard[] = [];
     for (let i = 0; i < 3; i++) {
       game = playOne(game, rng);
       onTable.push(game.public.tableCards[game.public.tableCards.length - 1]);

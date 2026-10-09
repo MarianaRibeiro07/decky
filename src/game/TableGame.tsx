@@ -12,19 +12,24 @@ import { ConnectionBanner, StatusBanner } from './components/StatusBanner';
 import { TableBoard } from './components/TableBoard';
 import { statusText } from './status';
 import { useDealAnimation } from './useDealAnimation';
+import { useServerClock } from './useServerClock';
 import { useTableCue } from './useTableCue';
 
 interface Props {
   match: MatchView;
   players: MatchPlayer[];
   connection: ConnectionStatus;
+  /** Relógio do servidor. Padrão: server_now. A fixture usa o relógio do próprio aparelho. */
+  fetchNow?: () => Promise<number>;
 }
 
 /**
  * Modo mesa: o celular do dono vira a mesa central, só com informações públicas.
  * Não tem mão nem botões de jogo; o servidor recusa ações deste aparelho.
  */
-export function TableGame({ match, players, connection }: Props) {
+export function TableGame({ match, players, connection, fetchNow }: Props) {
+  // Só mostra o prazo; quem pede a expiração são os jogadores (a mesa não joga).
+  const clock = useServerClock(fetchNow);
   useScreenAwake();
   const insets = useSafeAreaInsets();
   // Placar e banner grandes só em aparelho alto: no celular baixo eles roubavam a altura da mesa
@@ -58,7 +63,7 @@ export function TableGame({ match, players, connection }: Props) {
       <ScoreBar state={state} viewerTeam={null} players={players} large={roomy} onLeave={leaveTable} />
       <ConnectionBanner status={connection} />
       <StatusBanner status={statusText({ state, viewerSeat: null, nameOf, canRespond: false, phase: deal.phase })} large={roomy} />
-      <TableBoard state={state} players={players} bottomSeat={1} viewerSeat={null} deal={deal} variant="large" cue={cue} />
+      <TableBoard state={state} players={players} bottomSeat={1} viewerSeat={null} deal={deal} variant="large" cue={cue} clockOffset={clock.offset} />
       <Text style={styles.footer} numberOfLines={1}>
         Mesa{match.roomCode ? ` · sala ${match.roomCode}` : ''} · mostra só o que é público
       </Text>

@@ -2,7 +2,12 @@
 // As funções recebem um `rpc` que chama o banco com a chave de serviço; nos testes,
 // o mesmo código roda contra o Postgres em memória com as migrations reais.
 import { RANKS, SUITS, applyAction, newMatch } from './engine/index.ts';
-import type { GameAction, MatchState, Rng } from './engine/index.ts';
+import type { Card, GameAction, MatchState, Rng } from './engine/index.ts';
+
+const EMPTY_SLOTS: (Card | null)[] = [null, null, null, null];
+
+/** Quantas vezes refazer a ação quando uma marcação de jogada automática muda no meio do commit. */
+const MAX_AUTO_RETRIES = 2;
 
 /** Chama uma função do banco e devolve o jsonb dela (lança em erro de banco). */
 export type Rpc = (fn: string, params: Record<string, unknown>) => Promise<any>;
@@ -23,8 +28,12 @@ export function parseAction(value: unknown): GameAction | null {
     case 'play_card': {
       const card = action.card;
       if (!card || typeof card !== 'object' || !RANKS.includes(card.rank) || !SUITS.includes(card.suit)) return null;
-      return { type: 'play_card', card: { rank: card.rank, suit: card.suit } };
+      const parsed = { rank: card.rank, suit: card.suit };
+      return action.hidden === true ? { type: 'play_card', card: parsed, hidden: true } : { type: 'play_card', card: parsed };
     }
+    case 'expire':
+      // O motor confere se é o prazo em aberto e se ele já venceu no relógio do servidor.
+      return Number.isSafeInteger(action.at) && action.at > 0 ? { type: 'expire', at: action.at } : null;
     case 'request_truco':
       return { type: 'request_truco' };
     case 'respond_truco':
@@ -52,7 +61,9 @@ export async function startMatchService(rpc: Rpc, userId: string, body: any, rng
   const roomId = body?.roomId;
   if (typeof roomId !== 'string') return badRequest();
 
-  const state = newMatch(rng);
+  // O primeiro prazo sai do relógio do banco, o mesmo que confere as expirações.
+  const now = Number(await rpc('server_now', {}));
+  const state = newMatch(rng, now);
   const data = await rpc('internal_start_match', {
     p_room_id: roomId,
     p_user_id: userId,
@@ -86,37 +97,59 @@ export async function submitActionService(rpc: Rpc, userId: string, body: any, r
     return badRequest();
   }
 
-  const loaded = await rpc('internal_get_match', {
-    p_match_id: matchId,
-    p_user_id: userId,
-    p_client_action_id: clientActionId,
-  });
-  if (!loaded.ok) return ok({ ok: false, error: loaded.error });
-  if (loaded.duplicate) return ok({ ok: true, newRevision: loaded.revision });
-  if (loaded.revision !== expectedRevision) return ok({ ok: false, error: 'conflict' });
+  for (let attempt = 0; ; attempt++) {
+    const loaded = await rpc('internal_get_match', {
+      p_match_id: matchId,
+      p_user_id: userId,
+      p_client_action_id: clientActionId,
+    });
+    if (!loaded.ok) return ok({ ok: false, error: loaded.error });
+    if (loaded.duplicate) return ok({ ok: true, newRevision: loaded.revision });
+    if (loaded.revision !== expectedRevision) return ok({ ok: false, error: 'conflict' });
 
-  const current: MatchState = { public: loaded.state, hands: loaded.hands };
-  const result = applyAction(current, loaded.seat, action, rng);
-  if (!result.ok) return ok({ ok: false, error: result.error });
+    const autoUsed: (Card | null)[] = loaded.autoCards ?? EMPTY_SLOTS;
+    const current: MatchState = {
+      public: loaded.state,
+      hands: loaded.hands,
+      covered: loaded.covered ?? EMPTY_SLOTS,
+      autoCards: autoUsed,
+    };
+    const result = applyAction(current, loaded.seat, action, rng, Number(loaded.now));
+    if (!result.ok) return ok({ ok: false, error: result.error });
 
-  const saved = await rpc('internal_commit_action', {
-    p_match_id: matchId,
-    p_user_id: userId,
-    p_expected_revision: loaded.revision,
-    p_state: result.state.public,
-    p_hands: result.state.hands,
-    p_event: result.event,
-    p_client_action_id: clientActionId,
-  });
+    const saved = await rpc('internal_commit_action', {
+      p_match_id: matchId,
+      p_user_id: userId,
+      p_expected_revision: loaded.revision,
+      p_state: result.state.public,
+      p_hands: result.state.hands,
+      p_covered: result.state.covered ?? EMPTY_SLOTS,
+      p_auto_cards: result.state.autoCards ?? EMPTY_SLOTS,
+      p_auto_used: autoUsed,
+      p_events: result.events,
+      p_client_action_id: clientActionId,
+    });
 
-  if (!saved.ok) return ok({ ok: false, error: saved.error });
-  // Quem agiu já recebe o estado público gravado e a PRÓPRIA mão: a tela dele atualiza sem esperar
-  // mais duas leituras (matches e get_my_hand). Os outros continuam recebendo pelo Realtime.
-  // Nada de mão alheia sai daqui: só `hands[seat - 1]`, a mesma que get_my_hand devolveria.
-  return ok({
-    ok: true,
-    newRevision: saved.newRevision,
-    state: result.state.public,
-    hand: { revision: saved.newRevision, seat: loaded.seat, cards: result.state.hands[loaded.seat - 1] },
-  });
+    // Marcação de jogada automática mudou no meio: relê e refaz com a marcação nova (sem erro para ninguém).
+    if (!saved.ok && saved.error === 'auto_changed' && attempt < MAX_AUTO_RETRIES) continue;
+    if (!saved.ok) return ok({ ok: false, error: saved.error === 'auto_changed' ? 'conflict' : saved.error });
+
+    // Quem agiu já recebe o estado público gravado e a PRÓPRIA mão: a tela dele atualiza sem esperar
+    // mais duas leituras (matches e get_my_hand). Os outros continuam recebendo pelo Realtime.
+    // Nada de mão alheia sai daqui: só o lugar de quem agiu, o mesmo que get_my_hand devolveria.
+    const seat = loaded.seat;
+    return ok({
+      ok: true,
+      newRevision: saved.newRevision,
+      state: result.state.public,
+      serverNow: Number(loaded.now),
+      hand: {
+        revision: saved.newRevision,
+        seat,
+        cards: result.state.hands[seat - 1],
+        covered: result.state.covered?.[seat - 1] ?? null,
+        autoCard: result.state.autoCards?.[seat - 1] ?? null,
+      },
+    });
+  }
 }

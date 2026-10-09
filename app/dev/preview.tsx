@@ -7,7 +7,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { applyAction, getLegalActions, newMatch, seededRng } from '../../supabase/functions/_shared/engine/index.ts';
 import type { MatchState } from '../../supabase/functions/_shared/engine/index.ts';
-import type { GameAction, GameResult, MatchPlayer, MatchView, Seat } from '../../src/contracts/types';
+import type { AutoCardResult, Card, GameAction, GameResult, MatchPlayer, MatchView, Seat } from '../../src/contracts/types';
+
+/** Sem servidor, o relógio "do servidor" é o do próprio aparelho. */
+const localNow = async () => Date.now();
 import { PlayerGame } from '../../src/game/PlayerGame';
 import { TableGame } from '../../src/game/TableGame';
 import { SeatPicker } from '../../src/rooms/SeatPicker';
@@ -78,6 +81,22 @@ function Fixture() {
     gameRef.current = next;
     setGame(next);
     return { ok: true, newRevision: next.revision };
+  }
+
+  // Faz o papel de set_my_auto_card: só carta da própria mão, fora da própria vez com jogada livre.
+  async function setAutoCard(_: string, card: Card | null): Promise<AutoCardResult> {
+    const current = gameRef.current;
+    if (view === 'table' || view === 'lobby') return { ok: false, error: 'not_member' };
+    if (card && !current.state.hands[view - 1].some((c) => c.rank === card.rank && c.suit === card.suit)) {
+      return { ok: false, error: 'invalid_card' };
+    }
+    if (card && getLegalActions(current.state.public, view).playCard) return { ok: false, error: 'illegal_action' };
+    const autoCards = [...(current.state.autoCards ?? [null, null, null, null])];
+    autoCards[view - 1] = card;
+    const next = { ...current, state: { ...current.state, autoCards } };
+    gameRef.current = next;
+    setGame(next);
+    return { ok: true, autoCard: card };
   }
 
   // Atalhos da fixture: aplicam a ação pelo lugar que agiria agora, sem sair da visão atual
@@ -194,17 +213,25 @@ function Fixture() {
             />
           </Screen>
         ) : view === 'table' ? (
-          <TableGame match={match} players={players} connection="online" />
+          <TableGame match={match} players={players} connection="online" fetchNow={localNow} />
         ) : (
           <PlayerGame
             key={`${view}-${withTable}`}
             match={match}
-            hand={{ revision: game.revision, seat: view, cards: game.state.hands[view - 1] }}
+            hand={{
+              revision: game.revision,
+              seat: view,
+              cards: game.state.hands[view - 1],
+              covered: game.state.covered?.[view - 1] ?? null,
+              autoCard: game.state.autoCards?.[view - 1] ?? null,
+            }}
             players={players}
             mySeat={view}
             connection="online"
             refresh={async () => {}}
             submit={submit}
+            setAutoCard={setAutoCard}
+            fetchNow={localNow}
           />
         )}
       </View>

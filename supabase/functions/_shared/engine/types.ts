@@ -17,6 +17,25 @@ export type TrickResult = Team | 'tie';
 export interface TableCard {
   seat: Seat;
   card: Card;
+  /** Foi jogada escondida (D-20). Só aparece em `lastTrick`, quando a carta já foi revelada. */
+  hidden?: boolean;
+}
+
+/** Carta na mesa como todos veem: a escondida não traz a carta, só o lugar de quem jogou. */
+export type PublicTableCard = TableCard | { seat: Seat; card: null; hidden: true };
+
+/**
+ * Prazo da decisão em aberto (D-25), no relógio do servidor (epoch ms do Postgres).
+ * 'play': `seat` precisa jogar carta. 'truco': a dupla `team` precisa responder ao pedido.
+ */
+export interface ActionDeadline {
+  kind: 'play' | 'truco';
+  /** Início da contagem; na mão nova, depois da folga da distribuição. */
+  startsAt: number;
+  /** Fim do prazo: a partir daqui qualquer jogador pode pedir a expiração. */
+  at: number;
+  seat: Seat | null;
+  team: Team | null;
 }
 
 /** Pedido de truco aguardando resposta da dupla adversária. */
@@ -51,7 +70,7 @@ export interface TeamProposal {
 }
 
 /** Como terminou (ou em que pé está) um pedido de confirmação, para o evento público. */
-export type ProposalStatus = 'opened' | 'confirmed' | 'rejected' | 'cancelled' | 'invalidated';
+export type ProposalStatus = 'opened' | 'confirmed' | 'rejected' | 'cancelled' | 'invalidated' | 'expired';
 
 export type HandEndReason = 'tricks' | 'refused' | 'fold' | 'all_tied';
 
@@ -78,7 +97,7 @@ export interface PublicGameState {
   raiseRight: Team | null;
   /** Dupla(s) na mão de 11; nessa mão não há truco. */
   maoDeOnze: Team | 'both' | null;
-  tableCards: TableCard[];
+  tableCards: PublicTableCard[];
   trickResults: TrickResult[];
   lastTrick: { cards: TableCard[]; result: TrickResult } | null;
   lastHand: HandSummary | null;
@@ -88,6 +107,8 @@ export interface PublicGameState {
   proposal?: TeamProposal | null;
   /** Último número de pedido usado na partida (os números nunca se repetem). */
   proposalSeq?: number;
+  /** Prazo da decisão em aberto. Opcional: partidas gravadas antes desta versão não têm (sem relógio). */
+  deadline?: ActionDeadline | null;
   winnerTeam: Team | null;
 }
 
@@ -95,12 +116,19 @@ export interface PublicGameState {
 export interface MatchState {
   public: PublicGameState;
   hands: Card[][];
+  /** Por lugar: a carta escondida na vaza atual (D-20). Nunca vai para o estado público. */
+  covered?: (Card | null)[];
+  /** Por lugar: a carta marcada para jogada automática (D-23). Nunca vai para o estado público. */
+  autoCards?: (Card | null)[];
 }
 
 export type TrucoResponse = 'accept' | 'refuse' | 'raise';
 
 export type GameAction =
-  | { type: 'play_card'; card: Card }
+  /** `hidden`: joga a carta virada (só a partir da 2ª vaza, D-20). */
+  | { type: 'play_card'; card: Card; hidden?: boolean }
+  /** O prazo `at` venceu: o servidor confere no relógio dele e aplica D-26 ou D-27. */
+  | { type: 'expire'; at: number }
   | { type: 'request_truco' }
   | { type: 'respond_truco'; response: TrucoResponse }
   | { type: 'fold' }
@@ -111,7 +139,7 @@ export type GameAction =
 
 export type GameActionType = GameAction['type'];
 
-export type RuleError = 'not_your_turn' | 'invalid_card' | 'illegal_action' | 'match_over';
+export type RuleError = 'not_your_turn' | 'invalid_card' | 'illegal_action' | 'match_over' | 'too_early';
 
 /** Evento público gravado em match_events. Nada sensível aqui. */
 export interface PublicEvent {
@@ -119,6 +147,12 @@ export interface PublicEvent {
   action: GameActionType;
   card?: Card;
   response?: TrucoResponse;
+  /** Carta jogada escondida: o evento não traz `card`. */
+  hidden?: true;
+  /** Jogada feita pelo servidor com a carta marcada para jogada automática. */
+  auto?: true;
+  /** Ação aplicada pelo servidor porque o prazo venceu. */
+  timeout?: true;
   /**
    * Presente quando o evento vem de uma decisão da dupla. 'opened': o pedido foi registrado e a ação
    * ainda NÃO aconteceu. 'confirmed': a ação aconteceu (o evento descreve a ação, com `seat` de quem
@@ -127,8 +161,12 @@ export interface PublicEvent {
   proposal?: { id: number; status: ProposalStatus; decision: TeamDecision; by: Seat };
 }
 
+/**
+ * `event` é a ação pedida (vai para `lastEvent`); `events` é ela seguida das jogadas automáticas
+ * que vieram em cadeia, na ordem, para o histórico (`match_events`).
+ */
 export type ApplyResult =
-  | { ok: true; state: MatchState; event: PublicEvent }
+  | { ok: true; state: MatchState; event: PublicEvent; events: PublicEvent[] }
   | { ok: false; error: RuleError };
 
 /** Gera um número em [0, 1). Injetável para testes determinísticos. */

@@ -2,6 +2,8 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import type {
   ActionRequest,
+  AutoCardResult,
+  Card,
   GameAction,
   GameError,
   GameResult,
@@ -36,8 +38,13 @@ export function startMatch(roomId: string): Promise<StartMatchResult> {
  * Envia uma ação. Em caso de falha de rede, reenvia com o mesmo clientActionId:
  * se a primeira chegou, o servidor reconhece e não duplica.
  */
-export async function submitAction(matchId: string, action: GameAction, expectedRevision: number): Promise<GameResult> {
-  const request: ActionRequest = { matchId, action, expectedRevision, clientActionId: newClientActionId() };
+export async function submitAction(
+  matchId: string,
+  action: GameAction,
+  expectedRevision: number,
+  clientActionId: string = newClientActionId(),
+): Promise<GameResult> {
+  const request: ActionRequest = { matchId, action, expectedRevision, clientActionId };
   let result = await invoke<GameResult>('submit-action', { ...request });
   for (let attempt = 1; attempt <= 2 && !result.ok && result.error === 'network_error'; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
@@ -70,6 +77,23 @@ export async function fetchMyHand(matchId: string): Promise<PrivateHand | null> 
   const { data, error } = await supabase.rpc('get_my_hand', { p_match_id: matchId });
   if (error) throw error;
   return (data as PrivateHand | null) ?? null;
+}
+
+/**
+ * Marca (ou cancela, com null) a carta da própria mão para jogada automática. Não muda a revisão:
+ * o servidor só guarda a marcação, em privado, e a joga quando a vez chegar.
+ */
+export async function setMyAutoCard(matchId: string, card: Card | null): Promise<AutoCardResult> {
+  const { data, error } = await supabase.rpc('set_my_auto_card', { p_match_id: matchId, p_card: card });
+  if (error) return { ok: false, error: 'network_error' };
+  return data as AutoCardResult;
+}
+
+/** Relógio do servidor (epoch ms), para calcular a diferença com o relógio do aparelho. */
+export async function fetchServerNow(): Promise<number> {
+  const { data, error } = await supabase.rpc('server_now');
+  if (error) throw error;
+  return Number(data);
 }
 
 export async function fetchMatchPlayers(matchId: string): Promise<MatchPlayer[]> {

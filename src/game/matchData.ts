@@ -25,7 +25,10 @@ export interface MatchRead {
 const sameCards = (a: Card[], b: Card[]) =>
   a.length === b.length && a.every((card, i) => card.rank === b[i].rank && card.suit === b[i].suit);
 
-const samePlayers = (a: MatchPlayer[], b: MatchPlayer[]) =>
+const sameSlot = (a: Card | null | undefined, b: Card | null | undefined) =>
+  a == null || b == null ? (a ?? null) === (b ?? null) : a.rank === b.rank && a.suit === b.suit;
+
+const samePlayers =(a: MatchPlayer[], b: MatchPlayer[]) =>
   a.length === b.length &&
   a.every((p, i) => p.seat === b[i].seat && p.userId === b[i].userId && p.displayName === b[i].displayName);
 
@@ -49,7 +52,10 @@ export function mergeMatchData(prev: MatchData, read: MatchRead, userId: string 
     read.hand &&
     prev.hand.revision === read.hand.revision &&
     prev.hand.seat === read.hand.seat &&
-    sameCards(prev.hand.cards, read.hand.cards)
+    sameCards(prev.hand.cards, read.hand.cards) &&
+    // A marcação de jogada automática muda sem mudar a revisão: entra na comparação.
+    sameSlot(prev.hand.covered, read.hand.covered) &&
+    sameSlot(prev.hand.autoCard, read.hand.autoCard)
   )
     hand = prev.hand;
   else hand = read.hand;
@@ -84,6 +90,15 @@ export function readFromResult(current: MatchData, result: GameResult): MatchRea
     players: current.players,
     hand: result.hand ?? undefined,
   };
+}
+
+/**
+ * Aplica a marcação de jogada automática que o servidor confirmou (set_my_auto_card não muda a
+ * revisão, então a próxima leitura não buscaria a mão de novo). Mesmo valor devolve `data` intacto.
+ */
+export function withAutoCard(data: MatchData, autoCard: Card | null): MatchData {
+  if (!data.hand || sameSlot(data.hand.autoCard, autoCard)) return data;
+  return { ...data, hand: { ...data.hand, autoCard } };
 }
 
 /**

@@ -40,10 +40,23 @@ async function getMatch(matchId: string, userId: string, clientActionId: string)
   return row.r;
 }
 
+const NO_SLOTS = [null, null, null, null];
+
 async function commit(matchId: string, userId: string, expected: number, state: MatchState, clientActionId: string) {
   const [row] = await t.asService<{ r: Json }>(
-    'select public.internal_commit_action($1, $2, $3, $4, $5, $6, $7) as r',
-    [matchId, userId, expected, state.public, state.hands, { seat: 1, action: 'play_card' }, clientActionId],
+    'select public.internal_commit_action($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) as r',
+    [
+      matchId,
+      userId,
+      expected,
+      state.public,
+      state.hands,
+      state.covered ?? NO_SLOTS,
+      state.autoCards ?? NO_SLOTS,
+      NO_SLOTS,
+      [{ seat: 1, action: 'play_card' }],
+      clientActionId,
+    ],
   );
   return row.r;
 }
@@ -90,7 +103,7 @@ describe('mãos privadas', () => {
     const players = [ana, bia, caio, duda];
     for (const [i, user] of players.entries()) {
       const [row] = await t.asUser<{ h: Json }>(user, 'select public.get_my_hand($1) as h', [matchId]);
-      expect(row.h).toEqual({ revision: 0, seat: i + 1, cards: state.hands[i] });
+      expect(row.h).toEqual({ revision: 0, seat: i + 1, cards: state.hands[i], covered: null, autoCard: null });
     }
   });
 

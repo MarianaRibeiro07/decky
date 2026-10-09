@@ -1,16 +1,22 @@
 import { deal, nextSeat, otherTeam, sameCard, teamOf } from './cards.ts';
 import { handOutcome } from './hand.ts';
 import { manilhaRankFor, resolveTrick } from './strength.ts';
+import { deadlineFor, weakestCard } from './turns.ts';
 import type {
   ApplyResult,
+  Card,
   GameAction,
   HandSummary,
   HandValue,
   MatchState,
   ProposalStatus,
+  PublicEvent,
   PublicGameState,
+  PublicTableCard,
   Rng,
+  RuleError,
   Seat,
+  TableCard,
   Team,
   TeamDecision,
   TeamProposal,
@@ -20,9 +26,19 @@ export const WINNING_SCORE = 12;
 
 const NEXT_VALUE: Record<HandValue, 3 | 6 | 9 | 12 | null> = { 1: 3, 3: 6, 6: 9, 9: 12, 12: null };
 
+/** Teto de jogadas automáticas encadeadas numa ação (uma volta da mesa). */
+const MAX_AUTO_PLAYS = 4;
+
+/** Resultado de uma regra isolada; `applyAction` junta as jogadas automáticas e o prazo. */
+type RuleResult = { ok: true; state: MatchState; event: PublicEvent } | { ok: false; error: RuleError };
+
+const emptySlots = (): (Card | null)[] => [null, null, null, null];
+
 /** Ações que o assento pode fazer agora. Usado pelo servidor para validar e pelo app para mostrar botões. */
 export interface LegalActions {
   playCard: boolean;
+  /** Pode jogar a carta escondida: na vez, a partir da 2ª vaza (D-20). */
+  playHidden: boolean;
   requestTruco: boolean;
   /** Valor que será pedido, quando requestTruco for true. */
   nextTrucoValue: 3 | 6 | 9 | 12 | null;
@@ -38,6 +54,7 @@ export interface LegalActions {
 export function getLegalActions(state: PublicGameState, seat: Seat): LegalActions {
   const none: LegalActions = {
     playCard: false,
+    playHidden: false,
     requestTruco: false,
     nextTrucoValue: null,
     respondTruco: false,
@@ -77,15 +94,17 @@ export function getLegalActions(state: PublicGameState, seat: Seat): LegalAction
   return {
     ...none,
     playCard: myTurn,
+    playHidden: myTurn && state.trickResults.length >= 1,
     requestTruco: canRequest,
     nextTrucoValue: canRequest ? nextValue : null,
     fold: true,
   };
 }
 
-/** Começa uma partida nova: placar zerado, assento 4 embaralha, assento 1 abre. */
-export function newMatch(rng: Rng): MatchState {
-  return startHand({ A: 0, B: 0 }, 4, 1, rng);
+/** Começa uma partida nova: placar zerado, assento 4 embaralha, assento 1 abre. `now` abre o primeiro prazo. */
+export function newMatch(rng: Rng, now: number = Date.now()): MatchState {
+  const match = startHand({ A: 0, B: 0 }, 4, 1, rng);
+  return { ...match, public: { ...match.public, deadline: deadlineFor(null, match.public, now) } };
 }
 
 /** Distribui uma mão nova. Quem abre é o assento seguinte ao de quem embaralhou. */
@@ -100,6 +119,9 @@ export function startHand(
   const maoDeOnze = maoDeOnzeFor(score);
   return {
     hands,
+    // Mão nova: nada escondido na mesa e nenhuma jogada automática marcada (D-22, D-24).
+    covered: emptySlots(),
+    autoCards: emptySlots(),
     public: {
       status: 'playing',
       handNumber,
@@ -120,6 +142,7 @@ export function startHand(
       lastEvent: null,
       proposal: null,
       proposalSeq: 0,
+      deadline: null,
       winnerTeam: null,
     },
   };
@@ -137,12 +160,111 @@ function maoDeOnzeFor(score: Record<Team, number>): Team | 'both' | null {
 /**
  * Aplica uma ação ao estado. Função pura: não altera o estado recebido.
  * rng só é usado quando a ação encerra a mão e outra precisa ser distribuída.
- * O evento público aceito fica em `lastEvent`, para todos os aparelhos mostrarem o que aconteceu.
+ * `now` (epoch ms do relógio do servidor) confere a expiração e abre o próximo prazo.
+ * Depois da ação, joga em cadeia as cartas marcadas para jogada automática de quem recebe a vez.
+ * O evento da ação pedida fica em `lastEvent`, para todos os aparelhos mostrarem o que aconteceu;
+ * `events` traz também as jogadas automáticas, para o histórico.
  */
-export function applyAction(state: MatchState, seat: Seat, action: GameAction, rng: Rng): ApplyResult {
-  const result = applyRule(state, seat, action, rng);
+export function applyAction(
+  state: MatchState,
+  seat: Seat,
+  action: GameAction,
+  rng: Rng,
+  now: number = Date.now(),
+): ApplyResult {
+  const result = action.type === 'expire' ? expireRule(state, action, rng, now) : applyRule(state, seat, action, rng);
   if (!result.ok) return result;
-  return { ...result, state: { ...result.state, public: { ...result.state.public, lastEvent: result.event } } };
+  const chained = runAutoPlays(result.state, rng);
+  const pub = chained.state.public;
+  return {
+    ok: true,
+    event: result.event,
+    events: [result.event, ...chained.events],
+    state: { ...chained.state, public: { ...pub, lastEvent: result.event, deadline: deadlineFor(state.public, pub, now) } },
+  };
+}
+
+function withAutoCard(state: MatchState, seat: Seat, card: Card | null): MatchState {
+  const autoCards = [...(state.autoCards ?? emptySlots())];
+  autoCards[seat - 1] = card;
+  return { ...state, autoCards };
+}
+
+/** Marcação de carta que já saiu da mão não vale mais (D-24). */
+function dropStaleAutoCards(state: MatchState): MatchState {
+  if (!state.autoCards) return state;
+  const autoCards = state.autoCards.map((card, i) =>
+    card && (state.hands[i] ?? []).some((c) => sameCard(c, card)) ? card : null,
+  );
+  return { ...state, autoCards };
+}
+
+/**
+ * Jogada automática (D-23): enquanto quem tem a vez tiver carta marcada e jogar for legal (sem truco
+ * nem pedido de dupla), o servidor joga essa carta, aberta, pela mesma regra da jogada manual.
+ * A marcação é limpa ao jogar ou quando a jogada não vale mais.
+ */
+function runAutoPlays(state: MatchState, rng: Rng): { state: MatchState; events: PublicEvent[] } {
+  let current = dropStaleAutoCards(state);
+  const events: PublicEvent[] = [];
+  for (let i = 0; i < MAX_AUTO_PLAYS; i++) {
+    const pub = current.public;
+    if (pub.status !== 'playing' || pub.truco || pub.proposal) break;
+    const seat = pub.currentTurnSeat;
+    const card = current.autoCards?.[seat - 1] ?? null;
+    if (!card) break;
+    const result = executeRule(current, seat, { type: 'play_card', card }, rng);
+    if (!result.ok) {
+      current = withAutoCard(current, seat, null);
+      break;
+    }
+    events.push({ ...result.event, auto: true });
+    current = withAutoCard(result.state, seat, null);
+  }
+  return { state: current, events };
+}
+
+/**
+ * Prazo vencido. Só vale para o prazo em aberto (`at` igual) e depois dele, no relógio do servidor.
+ * - Pedido da dupla aberto: termina como 'expired', sem efeito (D-28).
+ * - Jogar carta: a marcada para jogada automática, se ainda na mão; senão, a de menor força, aberta (D-26).
+ * - Responder truco/aumento: conta como recusa, nunca como aceite (D-27). Sai pelo lugar seguinte a
+ *   quem pediu, que é sempre da dupla que responde.
+ */
+function expireRule(
+  state: MatchState,
+  action: Extract<GameAction, { type: 'expire' }>,
+  rng: Rng,
+  now: number,
+): RuleResult {
+  const pub = state.public;
+  if (pub.status !== 'playing') return { ok: false, error: 'match_over' };
+  const deadline = pub.deadline ?? null;
+  if (!deadline || deadline.at !== action.at || now < deadline.at) return { ok: false, error: 'too_early' };
+
+  const proposal = pub.proposal ?? null;
+  const base: MatchState = { ...state, public: { ...pub, proposal: null } };
+  let result: RuleResult;
+
+  if (deadline.kind === 'truco') {
+    if (!pub.truco) return { ok: false, error: 'illegal_action' };
+    result = executeRule(base, nextSeat(pub.truco.requestedBySeat), { type: 'respond_truco', response: 'refuse' }, rng);
+  } else {
+    const seat = deadline.seat;
+    if (seat === null) return { ok: false, error: 'illegal_action' };
+    const hand = state.hands[seat - 1] ?? [];
+    const marked = state.autoCards?.[seat - 1] ?? null;
+    const card = marked && hand.some((c) => sameCard(c, marked)) ? marked : weakestCard(hand, pub.manilhaRank);
+    if (!card) return { ok: false, error: 'illegal_action' };
+    result = executeRule(base, seat, { type: 'play_card', card }, rng);
+    if (result.ok) result = { ...result, state: withAutoCard(result.state, seat, null) };
+  }
+
+  if (!result.ok) return result;
+  const expired = proposal
+    ? { proposal: { id: proposal.id, status: 'expired' as const, decision: proposal.decision, by: proposal.proposedBy } }
+    : {};
+  return { ...result, event: { ...result.event, timeout: true, ...expired } };
 }
 
 /**
@@ -194,7 +316,7 @@ const foldPoints = (pub: PublicGameState, team: Team) => (pub.maoDeOnze === team
  * viram um pedido que o parceiro confirma ou recusa. Enquanto o pedido existe, nenhuma outra ação
  * é aceita, então nada muda por baixo dele e a mão não termina antes da resposta.
  */
-function applyRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng): ApplyResult {
+function applyRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng): RuleResult {
   const pub = state.public;
   if (pub.status !== 'playing') return { ok: false, error: 'match_over' };
   if (action.type === 'confirm_proposal' || action.type === 'reject_proposal') {
@@ -221,7 +343,7 @@ function applyRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng):
   return {
     ok: true,
     event: { ...check.event, proposal: { id, status: 'opened', decision: decision.decision, by: seat } },
-    state: { hands: state.hands, public: { ...pub, proposal, proposalSeq: id } },
+    state: { ...state, public: { ...pub, proposal, proposalSeq: id } },
   };
 }
 
@@ -236,14 +358,14 @@ function answerProposal(
   seat: Seat,
   action: Extract<GameAction, { type: 'confirm_proposal' | 'reject_proposal' }>,
   rng: Rng,
-): ApplyResult {
+): RuleResult {
   const pub = state.public;
   const proposal = pub.proposal ?? null;
   if (!proposal || proposal.id !== action.proposalId || proposal.team !== teamOf(seat)) {
     return { ok: false, error: 'illegal_action' };
   }
   const info = (status: ProposalStatus) => ({ id: proposal.id, status, decision: proposal.decision, by: seat });
-  const cleared: MatchState = { hands: state.hands, public: { ...pub, proposal: null } };
+  const cleared: MatchState = { ...state, public: { ...pub, proposal: null } };
 
   if (action.type === 'reject_proposal') {
     const status = seat === proposal.proposedBy ? 'cancelled' : 'rejected';
@@ -266,7 +388,7 @@ function answerProposal(
 }
 
 /** Valida e aplica uma ação individual (ou a decisão já confirmada pela dupla). */
-function executeRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng): ApplyResult {
+function executeRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng): RuleResult {
   const pub = state.public;
   const legal = getLegalActions(pub, seat);
   const team = teamOf(seat);
@@ -275,35 +397,48 @@ function executeRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng
     case 'play_card': {
       if (pub.truco) return { ok: false, error: 'illegal_action' };
       if (!legal.playCard) return { ok: false, error: 'not_your_turn' };
+      if (action.hidden && !legal.playHidden) return { ok: false, error: 'illegal_action' };
       const hand = state.hands[seat - 1];
       const index = hand.findIndex((c) => sameCard(c, action.card));
       if (index === -1) return { ok: false, error: 'invalid_card' };
 
       const hands = state.hands.map((h) => [...h]);
       const [card] = hands[seat - 1].splice(index, 1);
-      const tableCards = [...pub.tableCards, { seat, card }];
-      const event = { seat, action: action.type, card };
+      // Carta escondida (D-20): na mesa pública só o lugar; a carta fica guardada só no servidor.
+      const covered = [...(state.covered ?? emptySlots())];
+      if (action.hidden) covered[seat - 1] = card;
+      const placed: PublicTableCard = action.hidden ? { seat, card: null, hidden: true } : { seat, card };
+      const tableCards = [...pub.tableCards, placed];
+      const event: PublicEvent = action.hidden
+        ? { seat, action: action.type, hidden: true }
+        : { seat, action: action.type, card };
 
       if (tableCards.length < 4) {
         return {
           ok: true,
           event,
-          state: { hands, public: { ...pub, tableCards, currentTurnSeat: nextSeat(seat) } },
+          state: { ...state, hands, covered, public: { ...pub, tableCards, currentTurnSeat: nextSeat(seat) } },
         };
       }
 
-      const trick = resolveTrick(tableCards, pub.manilhaRank);
+      // A vaza fecha: as escondidas são reveladas e contam com a força real (D-21).
+      const opened: TableCard[] = tableCards.map((t) =>
+        t.card === null ? { seat: t.seat, card: covered[t.seat - 1]!, hidden: true } : t,
+      );
+      const trick = resolveTrick(opened, pub.manilhaRank);
       const trickResults = [...pub.trickResults, trick.result];
       const afterTrick: PublicGameState = {
         ...pub,
         tableCards: [],
         trickResults,
-        lastTrick: { cards: tableCards, result: trick.result },
+        lastTrick: { cards: opened, result: trick.result },
         currentTurnSeat: trick.leadSeat,
       };
 
       const outcome = handOutcome(trickResults);
-      if (outcome === null) return { ok: true, event, state: { hands, public: afterTrick } };
+      if (outcome === null) {
+        return { ok: true, event, state: { ...state, hands, covered: emptySlots(), public: afterTrick } };
+      }
 
       const summary: HandSummary =
         outcome === 'none'
@@ -320,7 +455,7 @@ function executeRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng
         ok: true,
         event: { seat, action: action.type },
         state: {
-          hands: state.hands,
+          ...state,
           public: { ...pub, truco: { value: legal.nextTrucoValue, requestedBy: team, requestedBySeat: seat } },
         },
       };
@@ -336,7 +471,7 @@ function executeRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng
           ok: true,
           event,
           state: {
-            hands: state.hands,
+            ...state,
             // Depois do aceite, só quem aceitou pode pedir o próximo aumento (D-08).
             public: { ...pub, handValue: truco.value, truco: null, raiseRight: team },
           },
@@ -356,7 +491,7 @@ function executeRule(state: MatchState, seat: Seat, action: GameAction, rng: Rng
         ok: true,
         event,
         state: {
-          hands: state.hands,
+          ...state,
           public: {
             ...pub,
             handValue: truco.value,
@@ -389,12 +524,15 @@ function finishHand(pub: PublicGameState, summary: HandSummary, rng: Rng): Match
   if (winnerTeam) {
     return {
       hands: [[], [], [], []],
+      covered: emptySlots(),
+      autoCards: emptySlots(),
       public: {
         ...pub,
         status: 'finished',
         score,
         truco: null,
         proposal: null,
+        deadline: null,
         tableCards: [],
         lastHand: summary,
         winnerTeam,

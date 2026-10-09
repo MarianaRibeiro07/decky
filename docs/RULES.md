@@ -41,6 +41,15 @@ O SPEC marca estas convenções como **provisórias a validar**. Para o motor po
 | D-08 | Aumento depois de aceite | Só a dupla que aceitou pode pedir o próximo valor. Quem responde também pode aumentar direto ("seis!"), o que aceita o pedido atual | `game.ts`, `raiseRight` e `raise` | `game.test.ts`, "aceite muda o valor..." e "sobe 3, 6, 9, 12" |
 
 | D-09 | Quem decide correr e as apostas altas? | Correr (com ou sem truco pendente) e pedir, aumentar ou aceitar 6, 9 e 12 exigem os dois integrantes da dupla: um pede, o parceiro confirma ou recusa. Enquanto a dupla decide, a partida fica parada. TRUCO (3) e o aceite do 3 continuam individuais | `game.ts`, `teamDecisionFor`, `answerProposal` | `game.test.ts`, "decisão em dupla"; `flow.test.ts`, "decisão em dupla" |
+| D-20 | Carta escondida | Na própria vez, **a partir da 2ª vaza**, o jogador pode jogar a carta virada para baixo. Ela **mantém a força real**. Na 1ª vaza é recusada | `game.ts`, `play_card` com `hidden` | `hidden-auto-timer.test.ts`, "carta escondida"; `flow.test.ts` |
+| D-21 | Revelação da carta escondida | Quando a vaza fecha (4ª carta), a carta é revelada a todos e a vaza é resolvida com as cartas reais | `game.ts`, fechamento da vaza | idem |
+| D-22 | Mão que acaba no meio da vaza | A carta escondida é descartada **sem ser revelada**, como as cartas que ficaram na mão | `game.ts`, `startHand` | idem |
+| D-23 | Jogada automática | O jogador marca uma carta da mão fora da própria vez. Na próxima vez dele em que jogar for legal (sem truco nem pedido da dupla), o servidor joga essa carta, aberta, pela mesma regra da jogada manual. Na própria vez, a marcação não é aceita | `game.ts`, `runAutoPlays`; `set_my_auto_card` | `hidden-auto-timer.test.ts`, "jogada automática"; `flow.test.ts` |
+| D-24 | Fim da marcação | A marcação some quando a carta é jogada, quando sai da mão e quando a mão ou a partida acaba | `game.ts`, `dropStaleAutoCards`, `startHand` | idem |
+| D-25 | Prazo de 20 s | Cada decisão tem 20 s no relógio do servidor. O prazo começa quando a vez passa a um jogador, quando um truco/aumento é pedido e quando um truco é aceito. Na mão nova, começa depois de 3,5 s de folga para a distribuição. Pedido da dupla **não** reinicia o prazo | `turns.ts`, `deadlineFor` | `hidden-auto-timer.test.ts`, "prazo das decisões" |
+| D-26 | Prazo de jogar vencido | O servidor joga a carta marcada para jogada automática, se ainda estiver na mão; senão, a carta de **menor força** (empate: a primeira da mão), aberta | `game.ts`, `expireRule`; `turns.ts`, `weakestCard` | idem; `flow.test.ts` |
+| D-27 | Prazo de truco/aumento vencido | Conta como **recusa**: a dupla que pediu ganha o valor vigente antes do pedido. Nunca vira aceite. Vale para 3, 6, 9 e 12 | `game.ts`, `expireRule` | idem |
+| D-28 | Pedido da dupla aberto no fim do prazo | O pedido termina como `expired`, sem efeito, e a regra D-26 ou D-27 é aplicada na mesma ação | `game.ts`, `expireRule` | idem |
 
 Outras escolhas do motor:
 
@@ -68,3 +77,5 @@ Implementados em `tests/engine/` (Vitest, `npm test`). Todos os itens abaixo tê
 Qualquer regra de D-01 a D-08 que não esteja decidida **e testada** até a apresentação deve ser apresentada como limitação, nunca como cobertura total.
 
 Já se sabe que fica de fora: na mão de 11, a dupla com 11 não vê as cartas do parceiro antes de decidir.
+
+Prazo de 20 s: o servidor só aplica a expiração quando algum jogador pede (`expire`). Se os quatro apps estiverem fechados, o prazo fica vencido no estado e é aplicado assim que o primeiro aparelho voltar.
