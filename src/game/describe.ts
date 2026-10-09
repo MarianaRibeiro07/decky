@@ -4,8 +4,8 @@ import type {
   HandSummary,
   PublicEvent,
   PublicGameState,
+  PublicTableCard,
   Seat,
-  TableCard,
   Team,
   TeamDecision,
   TeamProposal,
@@ -147,6 +147,7 @@ export function proposalNote(event: PublicEvent | null | undefined, viewerSeat: 
   const p = event?.proposal;
   if (!p || seatTeam(p.by) !== seatTeam(viewerSeat)) return null;
   if (p.status === 'invalidated') return 'O pedido da dupla não vale mais e foi cancelado.';
+  if (p.status === 'expired') return 'O tempo acabou antes da confirmação da dupla.';
   if (p.by === viewerSeat) return null;
   const who = shortName(nameOf(p.by));
   if (p.status === 'rejected') return `${who} não quis ${DECISION_SHORT[p.decision]}. A mão continua.`;
@@ -173,8 +174,11 @@ export function cardsLeft(seat: Seat, tricksDone: number, tableSeats: Seat[], fi
  * esmaecimento: quando a vaza fecha e a carta passa de `tableCards` para `lastTrick`, o componente
  * continua o mesmo. Assim as três primeiras não "piscam" e a quarta ainda entra voando.
  */
-export function playedCardKey({ card }: TableCard): string {
-  return `${card.rank}_${card.suit}`;
+export function playedCardKey(played: PublicTableCard, trick = 0): string {
+  // A escondida não tem carta pública: a chave é o lugar e a vaza. Ela continua a mesma quando a vaza
+  // fecha e a carta é revelada em `lastTrick`, então o componente vira a carta em vez de remontar.
+  if (played.hidden) return `hidden-${played.seat}-${trick}`;
+  return `${played.card.rank}_${played.card.suit}`;
 }
 
 export interface SeatSummary {

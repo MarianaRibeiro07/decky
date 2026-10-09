@@ -41,6 +41,8 @@ interface Props {
   manilha?: boolean;
   /** Carta escolhida na mão, aguardando confirmação. */
   selected?: boolean;
+  /** Marcada para jogada automática: contorno e brilho azul-aço (o selo fica no painel da mão). */
+  auto?: boolean;
   /** Com `selected`: a jogada pode ser confirmada agora (contorno vermelho aceso; senão, metálico). */
   ready?: boolean;
   dimmed?: boolean;
@@ -58,6 +60,7 @@ export function PlayingCard({
   highlighted,
   manilha,
   selected,
+  auto,
   ready,
   dimmed,
   elevation = 'none',
@@ -71,9 +74,12 @@ export function PlayingCard({
   const shadows = [
     elevation === 'lifted' ? shadow.cardLifted : elevation === 'table' ? shadow.card : null,
     manilha && face ? shadow.manilha : null,
+    auto ? shadow.auto : null,
     selected && ready ? shadow.ready : null,
   ].filter(Boolean);
-  const label = face ? `${cardLabel(face)}${manilha ? ', manilha' : ''}` : 'carta virada';
+  const label = face
+    ? `${cardLabel(face)}${manilha ? ', manilha' : ''}${auto ? ', jogada automática' : ''}`
+    : 'carta virada';
 
   // A sombra fica num invólucro: no quadro de dentro o `overflow: hidden` (cantos da imagem) a cortaria.
   const image = (
@@ -84,6 +90,7 @@ export function PlayingCard({
           { width, height, borderRadius: corner, backgroundColor: face ? colors.paper : colors.ink },
           highlighted && styles.highlighted,
           manilha && face && styles.manilha,
+          auto && styles.auto,
           selected && (ready ? styles.selectedReady : styles.selectedWaiting),
         ]}
       >
@@ -155,6 +162,7 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: '100%' },
   highlighted: { borderWidth: 3, borderColor: colors.gold },
   manilha: { borderWidth: 2, borderColor: colors.goldBright },
+  auto: { borderWidth: 3, borderColor: colors.auto },
   selectedReady: { borderWidth: 3, borderColor: colors.red },
   selectedWaiting: { borderWidth: 3, borderColor: colors.metal },
   dimmed: { opacity: 0.5 },

@@ -46,6 +46,10 @@ export const colors = {
   teamA: '#7EA2DD',
   teamB: '#DE8A57',
 
+  // Jogada automática: azul-aço frio, distinto do dourado da manilha e do vermelho da carta pronta.
+  auto: '#8FB8E0',
+  autoDeep: '#24384F',
+
   success: '#6CC895',
   successBg: '#0F2419',
   errorBg: '#2B0E14',
@@ -97,6 +101,8 @@ export const shadow = {
   manilha: '0px 0px 10px rgba(235, 198, 110, 0.55)',
   /** Carta escolhida e pronta para jogar. */
   ready: '0px 0px 12px rgba(200, 16, 46, 0.55)',
+  /** Carta marcada para jogada automática. */
+  auto: '0px 0px 12px rgba(143, 184, 224, 0.6)',
 };
 
 /** Alvo mínimo de toque recomendado (44 x 44 pt); usamos mais nos botões principais. */

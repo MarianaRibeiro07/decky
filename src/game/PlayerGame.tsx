@@ -3,12 +3,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getLegalActions } from '../../supabase/functions/_shared/engine/game.ts';
-import type { GameAction, GameResult, MatchPlayer, MatchView, PrivateHand, Seat } from '../contracts/types';
+import type {
+  ActionDeadline,
+  AutoCardResult,
+  Card,
+  GameAction,
+  GameResult,
+  MatchPlayer,
+  MatchView,
+  PrivateHand,
+  Seat,
+} from '../contracts/types';
 import { errorMessage } from '../lib/errors';
 import type { ConnectionStatus } from '../lib/useLiveRefresh';
 import { useScreenAwake } from '../lib/useScreenAwake';
 import { colors, space } from '../ui/theme';
-import { submitAction } from './api';
+import { setMyAutoCard, submitAction } from './api';
+import { expireActionId } from './deadline';
+import { useDeadlineExpiry } from './useDeadlineExpiry';
+import { useServerClock } from './useServerClock';
 import { FinishedOverlay } from './components/FinishedOverlay';
 import { HandPanel } from './components/HandPanel';
 import { PlayerHud } from './components/PlayerHud';
@@ -34,7 +47,13 @@ interface Props {
    */
   applyResult?: (result: GameResult) => boolean;
   /** Envio da ação. Padrão: a Edge Function submit-action. A fixture de desenvolvimento injeta um simulador local. */
-  submit?: (matchId: string, action: GameAction, expectedRevision: number) => Promise<GameResult>;
+  submit?: (matchId: string, action: GameAction, expectedRevision: number, clientActionId?: string) => Promise<GameResult>;
+  /** Marca a jogada automática. Padrão: set_my_auto_card. A fixture injeta o simulador local. */
+  setAutoCard?: (matchId: string, card: Card | null) => Promise<AutoCardResult>;
+  /** Aplica a marcação confirmada na mão (ver `useMatch`). Ausente na fixture, que já redesenha sozinha. */
+  applyAutoCard?: (card: Card | null) => void;
+  /** Relógio do servidor. Padrão: server_now. A fixture usa o relógio do próprio aparelho. */
+  fetchNow?: () => Promise<number>;
 }
 
 /**
@@ -42,16 +61,57 @@ interface Props {
  * - sem mesa dedicada: a mesa pública completa (TableBoard);
  * - com mesa dedicada: só o essencial público (PlayerHud). A mesa completa fica no aparelho da mesa.
  */
-export function PlayerGame({ match, hand, players, mySeat, connection, refresh, applyResult, submit = submitAction }: Props) {
+export function PlayerGame({
+  match,
+  hand,
+  players,
+  mySeat,
+  connection,
+  refresh,
+  applyResult,
+  submit = submitAction,
+  setAutoCard = setMyAutoCard,
+  applyAutoCard,
+  fetchNow,
+}: Props) {
   useScreenAwake();
   const insets = useSafeAreaInsets();
   const state = match.state;
   const deal = useDealAnimation(match.matchId, state);
   const cue = useTableCue(match, connection);
+  const clock = useServerClock(fetchNow);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Trava síncrona: dois toques rápidos não chegam a enviar duas ações.
   const sending = useRef(false);
+  const revision = useRef(match.revision);
+  revision.current = match.revision;
+
+  // Marcação em envio: aparece na hora e volta atrás se o servidor recusar.
+  const [pendingAuto, setPendingAuto] = useState<{ card: Card | null } | null>(null);
+  const autoCard = pendingAuto ? pendingAuto.card : (hand?.autoCard ?? null);
+
+  async function chooseAutoCard(card: Card | null) {
+    setPendingAuto({ card });
+    try {
+      const result = await setAutoCard(match.matchId, card);
+      if (result.ok) applyAutoCard?.(result.autoCard);
+      else setError(errorMessage(result.error));
+    } finally {
+      setPendingAuto(null);
+    }
+  }
+
+  // Prazo vencido: este aparelho só avisa o servidor, que confere no relógio dele e aplica a regra.
+  // Conflito ou "cedo demais" (outro aparelho chegou antes) não viram erro: só relê.
+  const expire = useCallback(
+    async (deadline: ActionDeadline) => {
+      const result = await submit(match.matchId, { type: 'expire', at: deadline.at }, revision.current, expireActionId(deadline, mySeat));
+      if (!applyResult?.(result)) await refresh();
+    },
+    [submit, match.matchId, mySeat, applyResult, refresh],
+  );
+  useDeadlineExpiry(state.status === 'playing' ? state.deadline : null, mySeat, clock.offset, expire);
 
   const layout = playerLayout(match);
   const myTeam = seatTeam(mySeat);
@@ -72,7 +132,9 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
     setError(null);
     try {
       // O servidor valida vez, carta e truco; aqui só vai a intenção com a revisão que este aparelho viu.
+      const sentAt = Date.now();
       const result = await submit(match.matchId, action, match.revision);
+      if (result.ok && result.serverNow) clock.observe(result.serverNow, sentAt, Date.now());
       if (!result.ok) setError(errorMessage(result.error));
       // Com o estado na resposta, a tela de quem agiu atualiza sem esperar mais duas leituras.
       // Sem ele (erro, conflito, ação repetida), relê: o servidor continua sendo a fonte da verdade.
@@ -105,6 +167,8 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
             deal={deal}
             variant="compact"
             cue={cue}
+            clockOffset={clock.offset}
+            ownCovered={hand?.covered ?? null}
           />
         ) : (
           <PlayerHud state={state} players={players} mySeat={mySeat} deal={deal} cue={cue} />
@@ -129,6 +193,9 @@ export function PlayerGame({ match, hand, players, mySeat, connection, refresh, 
         onAct={act}
         bottomInset={insets.bottom}
         size={layout === 'hand' ? 'large' : 'normal'}
+        autoCard={autoCard}
+        onAutoCard={chooseAutoCard}
+        clockOffset={clock.offset}
       />
 
       {state.status === 'finished' ? (

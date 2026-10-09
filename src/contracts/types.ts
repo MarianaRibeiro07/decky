@@ -2,6 +2,7 @@
 // Os tipos do jogo vêm do motor, para existir uma única definição.
 // `export type` é apagado na compilação: o app não carrega código do motor por aqui.
 export type {
+  ActionDeadline,
   Card,
   GameAction,
   GameActionType,
@@ -10,6 +11,7 @@ export type {
   PublicEvent,
   ProposalStatus,
   PublicGameState,
+  PublicTableCard,
   Rank,
   Seat,
   Suit,
@@ -81,7 +83,14 @@ export interface PrivateHand {
   revision: number;
   seat: Seat;
   cards: Card[];
+  /** A carta que este jogador jogou escondida na vaza atual. Opcional: servidor antigo não manda. */
+  covered?: Card | null;
+  /** A carta marcada para jogada automática. Opcional: servidor antigo não manda. */
+  autoCard?: Card | null;
 }
+
+/** Resposta de set_my_auto_card. */
+export type AutoCardResult = { ok: true; autoCard: Card | null } | { ok: false; error: GameError };
 
 /** Corpo enviado para a Edge Function submit-action. */
 export interface ActionRequest {
@@ -96,6 +105,7 @@ export type GameError =
   | 'invalid_card'
   | 'illegal_action'
   | 'match_over'
+  | 'too_early'
   | 'conflict'
   | 'not_member'
   | 'match_not_found'
@@ -110,7 +120,7 @@ export type GameError =
  * servidor antigo, vem só a revisão e a tela relê.
  */
 export type GameResult =
-  | { ok: true; newRevision: number; state?: PublicGameState; hand?: PrivateHand }
+  | { ok: true; newRevision: number; state?: PublicGameState; hand?: PrivateHand; serverNow?: number }
   | { ok: false; error: GameError };
 
 export type StartMatchResult = { ok: true; matchId: string } | { ok: false; error: string };

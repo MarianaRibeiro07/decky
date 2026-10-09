@@ -1,6 +1,6 @@
 // Ícones vetoriais do Decky, desenhados com react-native-svg (já usado na mesa): sem fonte de
 // ícones nem imagem, nítidos em qualquer densidade de tela, iguais no Android e no iOS.
-import Svg, { Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 /** Contorno de uma estrela de `points` pontas centrada em (cx, cy). */
 export function starPath(cx: number, cy: number, outer: number, inner: number, points = 5): string {
@@ -17,7 +17,10 @@ export function starPath(cx: number, cy: number, outer: number, inner: number, p
 /** Estrela dourada de 5 pontas no quadrado 24 x 24 (selo da manilha). */
 export const STAR_24 = starPath(12, 12.6, 10.5, 4.4);
 
-export type IconName = 'play' | 'raise' | 'fold' | 'accept' | 'no';
+export type IconName = 'play' | 'raise' | 'fold' | 'accept' | 'no' | 'hidden' | 'bolt';
+
+/** Relâmpago da jogada automática (24 x 24). */
+export const BOLT_24 = 'M13.5 2.5 L5.5 13.5 H11 L10 21.5 L18.5 10 H13 Z';
 
 interface Props {
   name: IconName;
@@ -30,7 +33,9 @@ interface Props {
  * - raise: duas setas para cima (pedir truco, aumentar a aposta);
  * - fold: bandeira branca (correr, desistir da mão);
  * - accept: visto (aceitar o truco, confirmar a decisão da dupla);
- * - no: xis (recusar ou desistir de um pedido da dupla).
+ * - no: xis (recusar ou desistir de um pedido da dupla);
+ * - hidden: olho riscado (jogar a carta escondida);
+ * - bolt: relâmpago (jogada automática).
  */
 export function Icon({ name, size = 18, color }: Props) {
   return (
@@ -48,6 +53,14 @@ export function Icon({ name, size = 18, color }: Props) {
           <Path d="M5.5 21.5 V3" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
           <Path d="M6.5 4 C9.5 2.5 12 5.5 15 4.5 C16.5 4 17.5 3.5 19 3.5 V12.5 C17.5 12.5 16.5 13 15 13.5 C12 14.5 9.5 11.5 6.5 13 Z" fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" />
         </>
+      ) : name === 'hidden' ? (
+        <>
+          <Path d="M2.5 12 C5 7.5 8.5 5.5 12 5.5 C15.5 5.5 19 7.5 21.5 12 C19 16.5 15.5 18.5 12 18.5 C8.5 18.5 5 16.5 2.5 12 Z" fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+          <Circle cx="12" cy="12" r="3" fill="none" stroke={color} strokeWidth="2" />
+          <Path d="M4 20 L20 4" stroke={color} strokeWidth="2.4" strokeLinecap="round" />
+        </>
+      ) : name === 'bolt' ? (
+        <Path d={BOLT_24} fill={color} />
       ) : name === 'no' ? (
         <Path d="M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5" fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" />
       ) : (

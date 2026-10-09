@@ -1,5 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Animated as RNAnimated,
+  PanResponder,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -8,16 +17,21 @@ import Animated, {
   LinearTransition,
   useAnimatedStyle,
   withSpring,
+  ZoomIn,
+  ZoomOut,
 } from 'react-native-reanimated';
 import type { LegalActions } from '../../../supabase/functions/_shared/engine/game.ts';
 import type { Card, GameAction, MatchPlayer, PrivateHand, PublicGameState, Rank, Seat, TeamProposal } from '../../contracts/types';
 import { useRerenderAt } from '../../lib/useRerenderAt';
 import { Button } from '../../ui/Button';
-import type { IconName } from '../../ui/icons';
+import { Icon, type IconName } from '../../ui/icons';
 import { Notice } from '../../ui/Notice';
 import { CARD_RATIO, cardLabel, PlayingCard, sealSize } from '../../ui/PlayingCard';
-import { colors, font, radius, space, TOUCH_MIN } from '../../ui/theme';
+import { colors, font, radius, shadow, space, TOUCH_MIN } from '../../ui/theme';
+import { autoDragThreshold, canArmAuto, startsAutoDrag } from '../autoPlay';
 import { trucoControls, type Control, type ControlId } from '../controls';
+import { isMine } from '../deadline';
+import { DeadlineBar } from './DeadlineBar';
 import { initials, seatTeam, shortName } from '../describe';
 import { arrivedCards, landingMoments, type DealRun } from '../deal';
 import { cardKey as keyOf, manilhaReveals, revealMoments, revealProgress, showsManilha, type ManilhaReveal as Reveal } from '../manilha';
@@ -98,6 +112,12 @@ interface Props {
   bottomInset: number;
   /** 'large' quando a mão ocupa a tela (modo com mesa dedicada): cartas maiores. */
   size?: 'normal' | 'large';
+  /** Carta marcada para jogada automática (a do servidor ou a escolha em envio). */
+  autoCard?: Card | null;
+  /** Marca (ou cancela, com null) a jogada automática. Ausente: o gesto fica desligado. */
+  onAutoCard?: (card: Card | null) => void;
+  /** Relógio do servidor menos o do aparelho, para a contagem do prazo. */
+  clockOffset?: number;
 }
 
 /**
@@ -109,9 +129,30 @@ interface Props {
  * este aparelho recebe) e a manilha pública. Ao receber a mão, cada manilha ganha uma revelação
  * especial depois que a vira abre; ela não bloqueia a jogada e não se repete (ver `manilhaReveals`).
  */
-export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, note, players, onAct, bottomInset, size = 'normal' }: Props) {
+export function HandPanel({
+  state,
+  hand,
+  mySeat,
+  legal,
+  deal,
+  busy,
+  error,
+  note,
+  players,
+  onAct,
+  bottomInset,
+  size = 'normal',
+  autoCard = null,
+  onAutoCard,
+  clockOffset = 0,
+}: Props) {
   const { width, height } = useWindowDimensions();
   const [selected, setSelected] = useState<string | null>(null);
+  // Jogar a próxima carta escondida (D-20). Desliga sozinho quando deixa de valer e depois da jogada.
+  const [hiddenMode, setHiddenMode] = useState(false);
+  useEffect(() => {
+    if (!legal.playHidden) setHiddenMode(false);
+  }, [legal.playHidden]);
 
   const cards = hand?.cards ?? [];
   const dealing = deal.phase === 'intro' || deal.phase === 'dealing';
@@ -131,11 +172,25 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, note,
   const reveals = useManilhaReveals(deal.run, cards, state.manilhaRank);
   const now = Date.now();
 
+  // Jogada automática: arrastar a carta para cima, fora da própria vez. O limite segue o tamanho da carta.
+  const armable = !!onAutoCard && !busy && canArmAuto(state, legal, dealing);
+  const autoKey = autoCard ? keyOf(autoCard) : null;
+  const dragThreshold = autoDragThreshold(cardW * CARD_RATIO);
+  // A contagem que importa para quem olha: a própria vez, ou a resposta da própria dupla ao truco.
+  const myDeadline =
+    state.status === 'playing' && !dealing && state.deadline && isMine(state.deadline, mySeat) ? state.deadline : null;
+
+  function playCard(card: Card) {
+    const action: GameAction = hiddenMode ? { type: 'play_card', card, hidden: true } : { type: 'play_card', card };
+    onAct(`card-${keyOf(card)}`, action);
+    setHiddenMode(false);
+  }
+
   function tapCard(card: Card) {
     if (dealing || busy) return;
     const key = keyOf(card);
     if (selected === key && canPlay) {
-      onAct(`card-${key}`, { type: 'play_card', card });
+      playCard(card);
       return;
     }
     setSelected(selected === key ? null : key);
@@ -174,25 +229,40 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, note,
                 layout={LinearTransition.duration(200)}
               >
                 <LiftOnSelect selected={isSelected}>
-                  <PlayingCard
-                    card={card}
-                    width={cardW}
-                    selected={isSelected}
-                    ready={canPlay}
-                    manilha={manilha}
-                    dimmed={busy === `card-${key}`}
-                    elevation={isSelected ? 'lifted' : 'table'}
-                    disabled={dealing || !!busy}
-                    onPress={() => tapCard(card)}
-                    hint={
-                      isSelected
-                        ? canPlay
-                          ? 'Selecionada. Toque de novo ou em Jogar para confirmar'
-                          : 'Selecionada. Espere a sua vez para jogar'
-                        : 'Toque para selecionar'
-                    }
-                  />
-                  {revealing !== null ? <ManilhaReveal cardWidth={cardW} from={revealing} /> : null}
+                  <AutoDrag
+                    enabled={armable}
+                    threshold={dragThreshold}
+                    onArm={() => onAutoCard?.(key === autoKey ? null : card)}
+                  >
+                    {(armed) => (
+                      <>
+                        <PlayingCard
+                          card={card}
+                          width={cardW}
+                          selected={isSelected}
+                          ready={canPlay}
+                          manilha={manilha}
+                          auto={key === autoKey || armed}
+                          dimmed={busy === `card-${key}`}
+                          elevation={isSelected || armed ? 'lifted' : 'table'}
+                          disabled={dealing || !!busy}
+                          onPress={() => tapCard(card)}
+                          hint={cardHint(isSelected, canPlay, armable, key === autoKey)}
+                        />
+                        {revealing !== null ? <ManilhaReveal cardWidth={cardW} from={revealing} /> : null}
+                        {key === autoKey ? (
+                          <AutoSeal cardWidth={cardW} disabled={!onAutoCard || !!busy} onCancel={() => onAutoCard?.(null)} />
+                        ) : null}
+                        {armed ? (
+                          <Animated.View entering={FadeIn.duration(120)} pointerEvents="none" style={styles.armHint}>
+                            <Text style={styles.armHintText} allowFontScaling={false}>
+                              {key === autoKey ? 'CANCELAR' : 'AUTOMÁTICA'}
+                            </Text>
+                          </Animated.View>
+                        ) : null}
+                      </>
+                    )}
+                  </AutoDrag>
                 </LiftOnSelect>
               </Animated.View>
             );
@@ -204,6 +274,23 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, note,
       </LayoutAnimationConfig>
 
       <Notice kind="info" message={note} />
+
+      {/* Faixa fixa do prazo (e do botão de carta escondida): a altura não muda quando o prazo aparece. */}
+      <View style={styles.timerRow}>
+        <DeadlineBar
+          deadline={myDeadline}
+          offset={clockOffset}
+          variant="strip"
+          label={myDeadline?.kind === 'truco' ? 'Responder ao truco' : 'Sua vez'}
+        />
+        {mode === 'play' ? (
+          <HiddenToggle
+            active={hiddenMode}
+            enabled={legal.playHidden && !busy && !dealing}
+            onToggle={() => setHiddenMode((on) => !on)}
+          />
+        ) : null}
+      </View>
 
       {mode === 'proposal_confirm' || mode === 'proposal_sent' ? (
         // Decisão da dupla: quem já confirmou (avatares) e o que falta fazer, na mesma altura da fileira
@@ -235,15 +322,19 @@ export function HandPanel({ state, hand, mySeat, legal, deal, busy, error, note,
               loading={busy === c.id} disabled={!!busy || dealing} onPress={() => press(c)} />
           ))}
           <Button
-            label={playLabel(dealing, legal.playCard, selectedCard)}
-            hint={selectedCard ? `Joga ${cardLabel(selectedCard)} na mesa` : 'Toque numa carta da mão para escolher'}
-            icon="play"
+            label={playLabel(dealing, legal.playCard, selectedCard, hiddenMode)}
+            hint={
+              selectedCard
+                ? `Joga ${cardLabel(selectedCard)} na mesa${hiddenMode ? ', virada para baixo' : ''}`
+                : 'Toque numa carta da mão para escolher'
+            }
+            icon={hiddenMode ? 'hidden' : 'play'}
             variant="primary"
             size="compact"
             style={styles.play}
             disabled={!selectedCard || !canPlay}
             loading={!!selectedCard && busy === `card-${keyOf(selectedCard)}`}
-            onPress={() => selectedCard && onAct(`card-${keyOf(selectedCard)}`, { type: 'play_card', card: selectedCard })}
+            onPress={() => selectedCard && playCard(selectedCard)}
           />
         </View>
       ) : null}
@@ -300,11 +391,123 @@ function WaitingLine({ text }: { text: string }) {
 }
 
 /** O rótulo do botão de jogar diz por que ele está parado, em vez de só ficar apagado. */
-function playLabel(dealing: boolean, myTurn: boolean, selected: Card | null): string {
+function playLabel(dealing: boolean, myTurn: boolean, selected: Card | null, hidden: boolean): string {
   if (dealing) return 'Distribuindo…';
   if (!myTurn) return 'Aguarde a vez';
   if (!selected) return 'Escolha a carta';
-  return 'Jogar';
+  return hidden ? 'Jogar virada' : 'Jogar';
+}
+
+function cardHint(selected: boolean, canPlay: boolean, armable: boolean, isAuto: boolean): string {
+  if (isAuto) return 'Marcada para jogar sozinha na sua vez. Arraste para cima ou toque no selo para cancelar';
+  if (selected) return canPlay ? 'Selecionada. Toque de novo ou em Jogar para confirmar' : 'Selecionada. Espere a sua vez para jogar';
+  return armable ? 'Toque para selecionar. Arraste para cima para jogar sozinha na sua vez' : 'Toque para selecionar';
+}
+
+/**
+ * Arrastar a carta para cima marca a jogada automática. A carta segue o dedo (um `Animated.Value`,
+ * sem redesenhar a mão a cada movimento); só a passagem pelo limite muda estado, uma vez. Soltar além
+ * do limite marca (ou cancela, na carta já marcada); antes dele, a carta volta com uma mola curta.
+ * O gesto só começa com movimento claramente vertical para cima, então o toque continua selecionando.
+ */
+function AutoDrag({
+  enabled,
+  threshold,
+  onArm,
+  children,
+}: {
+  enabled: boolean;
+  threshold: number;
+  onArm: () => void;
+  children: (armed: boolean) => ReactNode;
+}) {
+  const y = useRef(new RNAnimated.Value(0)).current;
+  const [armed, setArmed] = useState(false);
+  const armedRef = useRef(false);
+  const latest = useRef({ enabled, threshold, onArm });
+  latest.current = { enabled, threshold, onArm };
+
+  const responder = useMemo(() => {
+    const setCrossed = (crossed: boolean) => {
+      if (crossed === armedRef.current) return;
+      armedRef.current = crossed;
+      setArmed(crossed);
+    };
+    const settle = () => {
+      setCrossed(false);
+      RNAnimated.spring(y, { toValue: 0, useNativeDriver: Platform.OS !== 'web', damping: 16, stiffness: 260 }).start();
+    };
+    const claim = (_: unknown, g: { dx: number; dy: number }) => latest.current.enabled && startsAutoDrag(g.dx, g.dy);
+    return PanResponder.create({
+      onMoveShouldSetPanResponder: claim,
+      onMoveShouldSetPanResponderCapture: claim,
+      // Durante o gesto, a rolagem e os toques não tomam a carta do dedo.
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderMove: (_, g) => {
+        const limit = latest.current.threshold;
+        y.setValue(Math.max(-limit * 1.5, Math.min(0, g.dy)));
+        setCrossed(-g.dy >= limit);
+      },
+      onPanResponderRelease: () => {
+        if (armedRef.current) latest.current.onArm();
+        settle();
+      },
+      onPanResponderTerminate: settle,
+    });
+  }, [y]);
+
+  return (
+    <RNAnimated.View {...responder.panHandlers} style={{ transform: [{ translateY: y }] }}>
+      {children(armed)}
+    </RNAnimated.View>
+  );
+}
+
+/**
+ * Selo da jogada automática: medalha azul-aço com relâmpago no canto superior esquerdo (a manilha usa
+ * o direito), metade para fora da carta. Fica enquanto a marcação existir; tocar nele cancela.
+ */
+function AutoSeal({ cardWidth, disabled, onCancel }: { cardWidth: number; disabled: boolean; onCancel: () => void }) {
+  const size = sealSize(cardWidth);
+  return (
+    <Animated.View
+      entering={ZoomIn.springify().damping(12)}
+      exiting={ZoomOut.duration(160)}
+      style={[styles.autoSeal, { width: size, height: size, borderRadius: size / 2, top: -size * 0.34, left: -size * 0.34 }]}
+    >
+      <Pressable
+        onPress={onCancel}
+        disabled={disabled}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Cancelar jogada automática"
+        style={styles.autoSealPress}
+      >
+        <Icon name="bolt" size={size * 0.62} color={colors.auto} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** Liga a próxima jogada como carta escondida. Só a partir da 2ª vaza, na própria vez (o servidor confere). */
+function HiddenToggle({ active, enabled, onToggle }: { active: boolean; enabled: boolean; onToggle: () => void }) {
+  return (
+    <Pressable
+      onPress={onToggle}
+      disabled={!enabled}
+      hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+      accessibilityRole="switch"
+      accessibilityLabel="Jogar virada"
+      accessibilityHint={enabled ? 'A próxima carta vai para a mesa virada para baixo' : 'Só a partir da 2ª vaza, na sua vez'}
+      accessibilityState={{ checked: active, disabled: !enabled }}
+      style={[styles.hiddenToggle, active && styles.hiddenToggleOn, !enabled && styles.hiddenToggleOff]}
+    >
+      <Icon name="hidden" size={14} color={active ? colors.ink : colors.goldSoft} />
+      <Text style={[styles.hiddenToggleText, active && styles.hiddenToggleTextOn]} allowFontScaling={false}>
+        VIRADA
+      </Text>
+    </Pressable>
+  );
 }
 
 /**
@@ -370,4 +573,40 @@ const styles = StyleSheet.create({
   memberMarkText: { color: colors.ink, fontSize: 9, lineHeight: 11, fontWeight: '900' },
   memberMarkPending: { color: colors.textMuted },
   memberCount: { color: colors.goldSoft, fontSize: 9.5, fontWeight: '900', letterSpacing: 0.8 },
+  timerRow: { height: 22, flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  hiddenToggle: {
+    height: 22,
+    paddingHorizontal: 8,
+    borderRadius: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.goldDeep,
+    backgroundColor: colors.surfaceRaised,
+  },
+  hiddenToggleOn: { backgroundColor: colors.gold, borderColor: colors.goldSoft },
+  hiddenToggleOff: { opacity: 0.4 },
+  hiddenToggleText: { color: colors.goldSoft, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  hiddenToggleTextOn: { color: colors.ink },
+  autoSeal: {
+    position: 'absolute',
+    backgroundColor: colors.autoDeep,
+    borderWidth: 1.5,
+    borderColor: colors.auto,
+    boxShadow: shadow.auto,
+  },
+  autoSealPress: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  armHint: {
+    position: 'absolute',
+    top: -24,
+    alignSelf: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    backgroundColor: colors.autoDeep,
+    borderWidth: 1,
+    borderColor: colors.auto,
+  },
+  armHintText: { color: colors.auto, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
 });

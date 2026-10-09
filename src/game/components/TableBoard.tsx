@@ -1,9 +1,23 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
-import Animated, { FadeInDown, FadeInLeft, FadeInRight, FadeInUp, FadeOut, LayoutAnimationConfig, ZoomIn } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeInDown,
+  FadeInLeft,
+  FadeInRight,
+  FadeInUp,
+  FadeOut,
+  LayoutAnimationConfig,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  ZoomIn,
+} from 'react-native-reanimated';
+import { nextSeat } from '../../../supabase/functions/_shared/engine/cards.ts';
 import { resolveTrick } from '../../../supabase/functions/_shared/engine/strength.ts';
-import type { MatchPlayer, PublicGameState, Seat, TableCard } from '../../contracts/types';
-import { CARD_BACK, cardRadius, PlayingCard } from '../../ui/PlayingCard';
+import type { Card, MatchPlayer, PublicGameState, PublicTableCard, Seat } from '../../contracts/types';
+import { Icon } from '../../ui/icons';
+import { CARD_BACK, CARD_RATIO, cardRadius, PlayingCard } from '../../ui/PlayingCard';
 import { surfaceMetrics } from '../../ui/shapes';
 import { TableSurface } from '../../ui/TableSurface';
 import { colors, font, radius, shadow } from '../../ui/theme';
@@ -37,6 +51,10 @@ export interface TableBoardProps {
   variant: TableVariant;
   /** Aviso da última ação confirmada: pedido/aceite de truco no centro, "Corro!" junto de quem falou. */
   cue: ShownCue | null;
+  /** Relógio do servidor menos o do aparelho, para o filete do prazo nas etiquetas. */
+  clockOffset?: number;
+  /** A carta que quem olha jogou escondida (da própria mão privada): só ele a vê de face. */
+  ownCovered?: Card | null;
 }
 
 /**
@@ -86,6 +104,8 @@ function Board({
   deal,
   variant,
   cue,
+  clockOffset = 0,
+  ownCovered = null,
   width,
   height,
   shape,
@@ -105,9 +125,16 @@ function Board({
   // Na mão nova, ela só aparece durante a pausa antes de distribuir.
   const showingLast =
     state.tableCards.length === 0 && state.lastTrick !== null && (state.trickResults.length > 0 || deal.phase === 'intro');
-  const cards: TableCard[] = showingLast ? state.lastTrick!.cards : state.tableCards;
+  const cards: PublicTableCard[] = showingLast ? state.lastTrick!.cards : state.tableCards;
+  // A vaza das cartas mostradas: a chave da escondida é a mesma enquanto ela é revelada.
+  const trick = showingLast ? state.trickResults.length - 1 : state.trickResults.length;
   const winnerSeat = showingLast && state.lastTrick!.result !== 'tie' ? resolveTrick(state.lastTrick!.cards, state.manilhaRank).leadSeat : null;
   const tableSeats = state.tableCards.map((c) => c.seat);
+
+  // Filete do prazo na etiqueta de quem decide: quem joga, ou quem responde ao truco pela dupla.
+  const deadline = playing && !dealing ? (state.deadline ?? null) : null;
+  const timerSeat =
+    deadline?.kind === 'play' ? deadline.seat : deadline && state.truco ? nextSeat(state.truco.requestedBySeat) : null;
 
   const displayName = (seat: Seat) => players.find((p) => p.seat === seat)?.displayName ?? `Lugar ${seat}`;
   const nameOf = (seat: Seat) => (seat === viewerSeat ? 'Você' : displayName(seat));
@@ -130,6 +157,8 @@ function Board({
             rect={g.played[side]}
             side={side}
             played={played}
+            trick={trick}
+            ownCovered={seat === viewerSeat ? ownCovered : null}
             dimmed={showingLast}
             winner={winnerSeat === seat}
             waiting={isTurn}
@@ -153,6 +182,7 @@ function Board({
             // A própria mão aparece embaixo; durante a distribuição os versos chegam voando.
             cardsLeft={seat === viewerSeat || dealing ? null : left}
             large={large}
+            timer={deadline && timerSeat === seat ? { deadline, offset: clockOffset } : null}
           />
         );
       })}
@@ -217,14 +247,18 @@ const TILT: Record<Side, string> = { bottom: '-2deg', right: '4deg', top: '2.5de
 interface SlotProps {
   rect: Rect;
   side: Side;
-  played: TableCard | undefined;
+  played: PublicTableCard | undefined;
+  /** Vaza das cartas mostradas (chave da carta escondida). */
+  trick: number;
+  /** Carta escondida de quem olha: ele vê a face, esmaecida e com o selo do olho riscado. */
+  ownCovered: Card | null;
   dimmed: boolean;
   winner: boolean;
   /** É a vez deste lugar: o espaço vazio pisca de leve. */
   waiting: boolean;
 }
 
-function PlayedSlot({ rect, side, played, dimmed, winner, waiting }: SlotProps) {
+function PlayedSlot({ rect, side, played, trick, ownCovered, dimmed, winner, waiting }: SlotProps) {
   const box = { left: rect.x, top: rect.y, width: rect.w, height: rect.h };
   if (!played) {
     // Marcação impressa no feltro; na vez do lugar, ganha o contorno dourado.
@@ -234,9 +268,13 @@ function PlayedSlot({ rect, side, played, dimmed, winner, waiting }: SlotProps) 
     // Chave só da carta: quando a vaza fecha, a carta continua montada (esmaece no lugar) em vez de
     // remontar. Antes a chave mudava com a vaza, as três primeiras piscavam e a quarta nem entrava voando.
     // A inclinação vai numa view interna: o `transform` do invólucro é da animação de entrada.
-    <Animated.View key={playedCardKey(played)} entering={ENTERING[side]} style={[styles.abs, box]}>
+    <Animated.View key={playedCardKey(played, trick)} entering={ENTERING[side]} style={[styles.abs, box]}>
       <View style={{ transform: [{ rotate: TILT[side] }] }}>
-        <PlayingCard card={played.card} width={rect.w} dimmed={dimmed && !winner} highlighted={winner} elevation="table" />
+        {played.hidden ? (
+          <HiddenPlayed card={played.card} own={ownCovered} width={rect.w} dimmed={dimmed && !winner} winner={winner} />
+        ) : (
+          <PlayingCard card={played.card} width={rect.w} dimmed={dimmed && !winner} highlighted={winner} elevation="table" />
+        )}
       </View>
       {winner ? (
         <Animated.View entering={ZoomIn.duration(220)} style={styles.winnerTag}>
@@ -244,6 +282,70 @@ function PlayedSlot({ rect, side, played, dimmed, winner, waiting }: SlotProps) 
         </Animated.View>
       ) : null}
     </Animated.View>
+  );
+}
+
+/** Virada da carta escondida quando a vaza fecha (verso, achata, face), no ritmo da vira. */
+const HIDDEN_FLIP_MS = 420;
+
+/**
+ * Carta jogada escondida. Enquanto a vaza está aberta, todos veem o verso (a carta nem chegou a este
+ * aparelho); o dono vê a própria carta esmaecida, com o selo do olho riscado. Quando a vaza fecha e o
+ * servidor revela a carta, ela vira uma vez. Montada já revelada (reconexão), aparece aberta, sem girar.
+ */
+function HiddenPlayed({
+  card,
+  own,
+  width,
+  dimmed,
+  winner,
+}: {
+  card: Card | null;
+  own: Card | null;
+  width: number;
+  dimmed: boolean;
+  winner: boolean;
+}) {
+  // 0 = verso, 1 = face.
+  const flip = useSharedValue(card ? 1 : 0);
+  const revealed = card !== null;
+
+  useEffect(() => {
+    if (revealed) flip.value = withTiming(1, { duration: HIDDEN_FLIP_MS, easing: Easing.inOut(Easing.cubic) });
+  }, [revealed, flip]);
+
+  const backStyle = useAnimatedStyle(() => ({
+    opacity: flip.value < 0.5 ? 1 : 0,
+    transform: [{ scaleX: Math.abs(Math.cos(flip.value * Math.PI)) }],
+  }));
+  const faceStyle = useAnimatedStyle(() => ({
+    opacity: flip.value >= 0.5 ? 1 : 0,
+    transform: [{ scaleX: Math.abs(Math.cos(flip.value * Math.PI)) }],
+  }));
+
+  if (!revealed && own) {
+    return (
+      <View accessible accessibilityLabel="Sua carta, jogada virada">
+        <PlayingCard card={own} width={width} dimmed elevation="table" />
+        <View pointerEvents="none" style={styles.hiddenSeal}>
+          <Icon name="hidden" size={14} color={colors.goldSoft} />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ width, height: width * CARD_RATIO }}>
+      {/* Depois da revelação o verso fica invisível: o leitor de tela também deixa de anunciá-lo. */}
+      <Animated.View style={[StyleSheet.absoluteFill, backStyle]} aria-hidden={revealed}>
+        <PlayingCard faceDown width={width} elevation="table" />
+      </Animated.View>
+      {card ? (
+        <Animated.View style={[StyleSheet.absoluteFill, faceStyle]}>
+          <PlayingCard card={card} width={width} dimmed={dimmed} highlighted={winner} elevation="table" />
+        </Animated.View>
+      ) : null}
+    </View>
   );
 }
 
@@ -286,6 +388,19 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   winnerText: { color: colors.goldSoft, fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  hiddenSeal: {
+    position: 'absolute',
+    top: -7,
+    right: -7,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.goldDeep,
+  },
   // Balão no estilo do logo: creme, contorno quase preto e vermelho.
   bubble: {
     position: 'absolute',

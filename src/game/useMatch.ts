@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
-import type { GameResult, MatchPlayer, PrivateHand } from '../contracts/types';
+import type { Card, GameResult, MatchPlayer, PrivateHand } from '../contracts/types';
 import { useLiveRefresh, type RefreshHint } from '../lib/useLiveRefresh';
 import { fetchMatch, fetchMatchPlayers, fetchMyHand } from './api';
-import { EMPTY_MATCH_DATA, mergeMatchData, needsHandRead, readFromResult, type MatchData } from './matchData';
+import { EMPTY_MATCH_DATA, mergeMatchData, needsHandRead, readFromResult, withAutoCard, type MatchData } from './matchData';
 
 export type { MatchData };
 
@@ -70,5 +70,8 @@ export function useMatch(matchId: string | undefined, userId: string | null) {
     [userId],
   );
 
-  return { ...data, connection: status, refresh: refreshNow, applyResult };
+  /** Aplica a marcação de jogada automática que o servidor confirmou (a revisão não muda com ela). */
+  const applyAutoCard = useCallback((autoCard: Card | null) => setData((d) => withAutoCard(d, autoCard)), []);
+
+  return { ...data, connection: status, refresh: refreshNow, applyResult, applyAutoCard };
 }
